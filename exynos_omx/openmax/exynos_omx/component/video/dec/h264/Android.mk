@@ -12,7 +12,7 @@ LOCAL_SRC_FILES := \
 LOCAL_MODULE := libOMX.Exynos.AVC.Decoder
 LOCAL_MODULE_PATH := $(TARGET_OUT_SHARED_LIBRARIES)/omx
 
-LOCAL_CFLAGS :=
+LOCAL_CFLAGS := -Wno-unused-variable -Wno-unused-label -Wno-unused-parameter -Wno-implicit-function-declaration -Wno-sign-compare -Wno-enum-conversion -Wno-switch -Wno-incompatible-pointer-types -DUSE_LOCAL_SEC_NV12TILED
 
 ifeq ($(BOARD_NONBLOCK_MODE_PROCESS), true)
 LOCAL_CFLAGS += -DNONBLOCK_MODE_PROCESS
@@ -31,7 +31,7 @@ LOCAL_ARM_MODE := arm
 LOCAL_STATIC_LIBRARIES := libExynosOMX_Vdec libExynosOMX_OSAL libExynosOMX_Basecomponent \
 	libswconverter libExynosVideoApi
 LOCAL_SHARED_LIBRARIES := libc libdl libcutils libutils liblog libui \
-	libExynosOMX_Resourcemanager libcsc libexynosv4l2 libion_exynos libexynosgscaler \
+	libExynosOMX_Resourcemanager libcsc libexynosv4l2 libion_exynos \
 	libhardware
 
 ifeq ($(BOARD_USES_MFC_FPS),true)

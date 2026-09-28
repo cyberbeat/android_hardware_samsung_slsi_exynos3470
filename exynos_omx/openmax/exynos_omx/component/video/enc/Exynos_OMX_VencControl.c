@@ -42,6 +42,16 @@
 #include "Exynos_OSAL_Android.h"
 #endif
 
+#if defined(USE_STOREMETADATA) && !defined(USE_ANB)
+/* Forward declaration: Exynos_OSAL_SetANBParameter is declared in
+ * Exynos_OSAL_Android.h, which is only included when USE_ANB is defined.
+ * Provide the declaration here so the USE_STOREMETADATA code path compiles
+ * without the full ANB header. */
+OMX_ERRORTYPE Exynos_OSAL_SetANBParameter(OMX_IN OMX_HANDLETYPE hComponent,
+                                          OMX_IN OMX_INDEXTYPE nIndex,
+                                          OMX_IN OMX_PTR ComponentParameterStructure);
+#endif
+
 #undef  EXYNOS_LOG_TAG
 #define EXYNOS_LOG_TAG    "EXYNOS_VIDEO_ENCCONTROL"
 #define EXYNOS_LOG_OFF
@@ -260,8 +270,6 @@ OMX_ERRORTYPE Exynos_OMX_FreeBuffer(
     EXYNOS_OMX_BASECOMPONENT *pExynosComponent = NULL;
     EXYNOS_OMX_VIDEOENC_COMPONENT *pVideoEnc = NULL;
     EXYNOS_OMX_BASEPORT      *pExynosPort = NULL;
-    OMX_BUFFERHEADERTYPE  *temp_bufferHeader = NULL;
-    OMX_U8                *temp_buffer = NULL;
     OMX_U32                i = 0;
 
     FunctionIn();
@@ -343,28 +351,21 @@ EXIT:
 
 OMX_ERRORTYPE Exynos_OMX_AllocateTunnelBuffer(EXYNOS_OMX_BASEPORT *pOMXBasePort, OMX_U32 nPortIndex)
 {
+    (void)pOMXBasePort;
+    (void)nPortIndex;
     OMX_ERRORTYPE                 ret = OMX_ErrorNone;
-    EXYNOS_OMX_BASEPORT             *pExynosPort = NULL;
-    OMX_BUFFERHEADERTYPE         *temp_bufferHeader = NULL;
-    OMX_U8                       *temp_buffer = NULL;
-    OMX_U32                       bufferSize = 0;
-    OMX_PARAM_PORTDEFINITIONTYPE  portDefinition;
 
     ret = OMX_ErrorTunnelingUnsupported;
-EXIT:
     return ret;
 }
 
 OMX_ERRORTYPE Exynos_OMX_FreeTunnelBuffer(EXYNOS_OMX_BASEPORT *pOMXBasePort, OMX_U32 nPortIndex)
 {
+    (void)pOMXBasePort;
+    (void)nPortIndex;
     OMX_ERRORTYPE ret = OMX_ErrorNone;
-    EXYNOS_OMX_BASEPORT* pExynosPort = NULL;
-    OMX_BUFFERHEADERTYPE* temp_bufferHeader = NULL;
-    OMX_U8 *temp_buffer = NULL;
-    OMX_U32 bufferSize = 0;
 
     ret = OMX_ErrorTunnelingUnsupported;
-EXIT:
     return ret;
 }
 
@@ -375,10 +376,14 @@ OMX_ERRORTYPE Exynos_OMX_ComponentTunnelRequest(
     OMX_IN OMX_U32        nTunneledPort,
     OMX_INOUT OMX_TUNNELSETUPTYPE *pTunnelSetup)
 {
+    (void)hComp;
+    (void)nPort;
+    (void)hTunneledComp;
+    (void)nTunneledPort;
+    (void)pTunnelSetup;
     OMX_ERRORTYPE ret = OMX_ErrorNone;
 
     ret = OMX_ErrorTunnelingUnsupported;
-EXIT:
     return ret;
 }
 
@@ -397,7 +402,6 @@ OMX_ERRORTYPE Exynos_OMX_GetFlushBuffer(EXYNOS_OMX_BASEPORT *pExynosPort, EXYNOS
             pDataBuffer[1] = &(pExynosPort->way.port2WayDataBuffer.outputDataBuffer);
     }
 
-EXIT:
     FunctionOut();
 
     return ret;
@@ -411,7 +415,6 @@ OMX_ERRORTYPE Exynos_OMX_FlushPort(OMX_COMPONENTTYPE *pOMXComponent, OMX_S32 por
     OMX_BUFFERHEADERTYPE     *bufferHeader = NULL;
     EXYNOS_OMX_DATABUFFER    *pDataPortBuffer[2] = {NULL, NULL};
     EXYNOS_OMX_MESSAGE       *message = NULL;
-    OMX_U32                flushNum = 0;
     OMX_S32                semValue = 0;
     int i = 0, maxBufferNum = 0;
     FunctionIn();
@@ -487,7 +490,6 @@ OMX_ERRORTYPE Exynos_OMX_FlushPort(OMX_COMPONENTTYPE *pOMXComponent, OMX_S32 por
     }
     Exynos_OSAL_ResetQueue(&pExynosPort->bufferQ);
 
-EXIT:
     FunctionOut();
 
     return ret;
@@ -500,7 +502,6 @@ OMX_ERRORTYPE Exynos_OMX_BufferFlush(OMX_COMPONENTTYPE *pOMXComponent, OMX_S32 n
     EXYNOS_OMX_VIDEOENC_COMPONENT *pVideoEnc = NULL;
     EXYNOS_OMX_BASEPORT      *pExynosPort = NULL;
     EXYNOS_OMX_DATABUFFER    *flushPortBuffer[2] = {NULL, NULL};
-    OMX_U32                   i = 0, cnt = 0;
 
     FunctionIn();
 
@@ -622,7 +623,6 @@ OMX_ERRORTYPE Exynos_InputBufferReturn(OMX_COMPONENTTYPE *pOMXComponent, EXYNOS_
     /* reset dataBuffer */
     Exynos_ResetDataBuffer(dataBuffer);
 
-EXIT:
     FunctionOut();
 
     return ret;
@@ -653,7 +653,7 @@ OMX_ERRORTYPE Exynos_InputBufferGetQueue(EXYNOS_OMX_BASECOMPONENT *pExynosCompon
             }
             if (message->messageType == EXYNOS_OMX_CommandFakeBuffer) {
                 Exynos_OSAL_Free(message);
-                ret = OMX_ErrorCodecFlush;
+                ret = (OMX_ERRORTYPE)OMX_ErrorCodecFlush;
                 goto EXIT;
             }
 
@@ -684,6 +684,7 @@ OMX_ERRORTYPE Exynos_OutputBufferReturn(OMX_COMPONENTTYPE *pOMXComponent, EXYNOS
     OMX_ERRORTYPE          ret = OMX_ErrorNone;
     EXYNOS_OMX_BASECOMPONENT *pExynosComponent = (EXYNOS_OMX_BASECOMPONENT *)pOMXComponent->pComponentPrivate;
     EXYNOS_OMX_BASEPORT      *exynosOMXOutputPort = &pExynosComponent->pExynosPort[OUTPUT_PORT_INDEX];
+    (void)exynosOMXOutputPort;
     OMX_BUFFERHEADERTYPE  *bufferHeader = NULL;
 
     FunctionIn();
@@ -718,7 +719,6 @@ OMX_ERRORTYPE Exynos_OutputBufferReturn(OMX_COMPONENTTYPE *pOMXComponent, EXYNOS
     /* reset dataBuffer */
     Exynos_ResetDataBuffer(dataBuffer);
 
-EXIT:
     FunctionOut();
 
     return ret;
@@ -753,7 +753,7 @@ OMX_ERRORTYPE Exynos_OutputBufferGetQueue(EXYNOS_OMX_BASECOMPONENT *pExynosCompo
             }
             if (message->messageType == EXYNOS_OMX_CommandFakeBuffer) {
                 Exynos_OSAL_Free(message);
-                ret = OMX_ErrorCodecFlush;
+                ret = (OMX_ERRORTYPE)OMX_ErrorCodecFlush;
                 goto EXIT;
             }
 
@@ -821,7 +821,7 @@ EXIT:
     return retBuffer;
 }
 
-OMX_ERRORTYPE Exynos_CodecBufferEnQueue(EXYNOS_OMX_BASECOMPONENT *pExynosComponent, OMX_U32 PortIndex, OMX_PTR data)
+OMX_ERRORTYPE Exynos_CodecBufferEnqueue(EXYNOS_OMX_BASECOMPONENT *pExynosComponent, OMX_U32 PortIndex, OMX_PTR data)
 {
     OMX_ERRORTYPE       ret = OMX_ErrorNone;
     EXYNOS_OMX_BASEPORT   *pExynosPort = NULL;
@@ -850,7 +850,7 @@ EXIT:
     return ret;
 }
 
-OMX_ERRORTYPE Exynos_CodecBufferDeQueue(EXYNOS_OMX_BASECOMPONENT *pExynosComponent, OMX_U32 PortIndex, OMX_PTR *data)
+OMX_ERRORTYPE Exynos_CodecBufferDequeue(EXYNOS_OMX_BASECOMPONENT *pExynosComponent, OMX_U32 PortIndex, OMX_PTR *data)
 {
     OMX_ERRORTYPE       ret = OMX_ErrorNone;
     EXYNOS_OMX_BASEPORT   *pExynosPort = NULL;
@@ -861,7 +861,7 @@ OMX_ERRORTYPE Exynos_CodecBufferDeQueue(EXYNOS_OMX_BASECOMPONENT *pExynosCompone
     pExynosPort = &pExynosComponent->pExynosPort[PortIndex];
     Exynos_OSAL_SemaphoreWait(pExynosPort->codecSemID);
     tempData = (OMX_U32)Exynos_OSAL_Dequeue(&pExynosPort->codecBufferQ);
-    if (tempData == NULL) {
+    if (tempData == (OMX_U32)NULL) {
         *data = NULL;
         ret = OMX_ErrorUndefined;
         goto EXIT;
@@ -891,7 +891,7 @@ OMX_ERRORTYPE Exynos_CodecBufferReset(EXYNOS_OMX_BASECOMPONENT *pExynosComponent
         goto EXIT;
     }
     while (1) {
-        int cnt = 0;
+        OMX_S32 cnt = 0;
         Exynos_OSAL_Get_SemaphoreCount(pExynosPort->codecSemID, &cnt);
         if (cnt > 0)
             Exynos_OSAL_SemaphoreWait(pExynosPort->codecSemID);
@@ -915,6 +915,7 @@ OMX_ERRORTYPE Exynos_OMX_VideoEncodeGetParameter(
     OMX_COMPONENTTYPE        *pOMXComponent = NULL;
     EXYNOS_OMX_BASECOMPONENT *pExynosComponent = NULL;
     EXYNOS_OMX_BASEPORT      *pExynosPort = NULL;
+    (void)pExynosPort;
 
     FunctionIn();
 
@@ -995,12 +996,12 @@ OMX_ERRORTYPE Exynos_OMX_VideoEncodeGetParameter(
                 break;
             case supportFormat_2:
                 portFormat->eCompressionFormat = OMX_VIDEO_CodingUnused;
-                portFormat->eColorFormat       = OMX_SEC_COLOR_FormatNV12Tiled;
+                portFormat->eColorFormat       = (OMX_COLOR_FORMATTYPE)OMX_SEC_COLOR_FormatNV12Tiled;
                 portFormat->xFramerate         = portDefinition->format.video.xFramerate;
                 break;
             case supportFormat_3:
                 portFormat->eCompressionFormat = OMX_VIDEO_CodingUnused;
-                portFormat->eColorFormat       = OMX_SEC_COLOR_FormatNV21Linear;
+                portFormat->eColorFormat       = (OMX_COLOR_FORMATTYPE)OMX_SEC_COLOR_FormatNV21Linear;
                 portFormat->xFramerate         = portDefinition->format.video.xFramerate;
                 break;
             case supportFormat_4:
@@ -1142,6 +1143,7 @@ OMX_ERRORTYPE Exynos_OMX_VideoEncodeSetParameter(
     OMX_COMPONENTTYPE        *pOMXComponent = NULL;
     EXYNOS_OMX_BASECOMPONENT *pExynosComponent = NULL;
     EXYNOS_OMX_BASEPORT      *pExynosPort = NULL;
+    (void)pExynosPort;
 
     FunctionIn();
 
@@ -1171,15 +1173,17 @@ OMX_ERRORTYPE Exynos_OMX_VideoEncodeSetParameter(
         goto EXIT;
     }
 
-    switch (nIndex) {
+    switch ((OMX_U32)nIndex) {
     case OMX_IndexParamVideoPortFormat:
     {
         OMX_VIDEO_PARAM_PORTFORMATTYPE *portFormat = (OMX_VIDEO_PARAM_PORTFORMATTYPE *)ComponentParameterStructure;
         OMX_U32                         portIndex = portFormat->nPortIndex;
         OMX_U32                         index    = portFormat->nIndex;
+        (void)index;
         EXYNOS_OMX_BASEPORT            *pExynosPort = NULL;
         OMX_PARAM_PORTDEFINITIONTYPE   *portDefinition = NULL;
         OMX_U32                         supportFormatNum = 0;
+        (void)supportFormatNum;
 
         ret = Exynos_OMX_Check_SizeVersion(portFormat, sizeof(OMX_VIDEO_PARAM_PORTFORMATTYPE));
         if (ret != OMX_ErrorNone) {
@@ -1250,6 +1254,9 @@ OMX_ERRORTYPE Exynos_OMX_VideoEncodeSetParameter(
         OMX_U32                       portIndex = pPortDefinition->nPortIndex;
         EXYNOS_OMX_BASEPORT          *pExynosPort;
         OMX_U32 width, height, size;
+        (void)width;
+        (void)height;
+        (void)size;
 
         if (portIndex >= pExynosComponent->portParam.nPorts) {
             ret = OMX_ErrorBadPortIndex;

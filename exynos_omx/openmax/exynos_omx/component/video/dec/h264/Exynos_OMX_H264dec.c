@@ -679,7 +679,7 @@ OMX_ERRORTYPE H264CodecEnQueueAllBuffer(OMX_COMPONENTTYPE *pOMXComponent, OMX_U3
             Exynos_OSAL_Log(EXYNOS_LOG_TRACE, "pVideoDec->pMFCDecInputBuffer[%d]: 0x%x", i, pVideoDec->pMFCDecInputBuffer[i]);
             Exynos_OSAL_Log(EXYNOS_LOG_TRACE, "pVideoDec->pMFCDecInputBuffer[%d]->pVirAddr[0]: 0x%x", i, pVideoDec->pMFCDecInputBuffer[i]->pVirAddr[0]);
 
-            Exynos_CodecBufferEnQueue(pExynosComponent, INPUT_PORT_INDEX, pVideoDec->pMFCDecInputBuffer[i]);
+            Exynos_CodecBufferEnqueue(pExynosComponent, INPUT_PORT_INDEX, pVideoDec->pMFCDecInputBuffer[i]);
         }
 
         pInbufOps->Clear_Queue(hMFCHandle);
@@ -693,7 +693,7 @@ OMX_ERRORTYPE H264CodecEnQueueAllBuffer(OMX_COMPONENTTYPE *pOMXComponent, OMX_U3
         nOutbufs = pDecOps->Get_ActualBufferCount(hMFCHandle);
         nOutbufs += EXTRA_DPB_NUM;
         for (i = 0; i < nOutbufs; i++) {
-            Exynos_CodecBufferEnQueue(pExynosComponent, OUTPUT_PORT_INDEX, pVideoDec->pMFCDecOutputBuffer[i]);
+            Exynos_CodecBufferEnqueue(pExynosComponent, OUTPUT_PORT_INDEX, pVideoDec->pMFCDecOutputBuffer[i]);
         }
         pOutbufOps->Clear_Queue(hMFCHandle);
     } else {
@@ -997,7 +997,7 @@ OMX_ERRORTYPE H264CodecDstSetup(OMX_COMPONENTTYPE *pOMXComponent)
         /*BUFFER_SHERE case, get dpb count */
         nOutbufs = pExynosOutputPort->portDefinition.nBufferCountActual;
     }
-    if (pOutbufOps->Enable_DynamicDPB(hMFCHandle) != VIDEO_ERROR_NONE) {
+    if (pDecOps->Enable_DynamicDPB(hMFCHandle) != VIDEO_ERROR_NONE) {
         ret = OMX_ErrorUndefined;
         goto EXIT;
     }
@@ -1589,7 +1589,7 @@ OMX_ERRORTYPE Exynos_H264Dec_Init(OMX_COMPONENTTYPE *pOMXComponent)
             goto EXIT;
 
         for (i = 0; i < MFC_INPUT_BUFFER_NUM_MAX; i++)
-            Exynos_CodecBufferEnQueue(pExynosComponent, INPUT_PORT_INDEX, pVideoDec->pMFCDecInputBuffer[i]);
+            Exynos_CodecBufferEnqueue(pExynosComponent, INPUT_PORT_INDEX, pVideoDec->pMFCDecInputBuffer[i]);
     } else if (pExynosInputPort->bufferProcessType == BUFFER_SHARE) {
         /*************/
         /*    TBD    */
@@ -1625,7 +1625,6 @@ OMX_ERRORTYPE Exynos_H264Dec_Init(OMX_COMPONENTTYPE *pOMXComponent)
     if (pVideoDec->bDRMPlayerMode == OMX_TRUE) {
         pVideoDec->csc_handle = csc_init(CSC_METHOD_HW);
         csc_set_hw_property(pVideoDec->csc_handle, CSC_HW_PROPERTY_FIXED_NODE, 2);
-        csc_set_hw_property(pVideoDec->csc_handle, CSC_HW_PROPERTY_HW_TYPE, CSC_HW_TYPE_GSCALER);
         csc_set_hw_property(pVideoDec->csc_handle, CSC_HW_PROPERTY_MODE_DRM, pVideoDec->bDRMPlayerMode);
     } else {
         pVideoDec->csc_handle = csc_init(csc_method);
@@ -1857,8 +1856,31 @@ OMX_ERRORTYPE Exynos_H264Dec_DstIn(OMX_COMPONENTTYPE *pOMXComponent, EXYNOS_OMX_
                                         pDstInputData->buffer.multiPlaneBuffer.fd[1]);
 
     OMX_U32 nAllocLen[VIDEO_BUFFER_MAX_PLANES] = {0, 0, 0};
-    nAllocLen[0] = pExynosOutputPort->portDefinition.format.video.nFrameWidth * pExynosOutputPort->portDefinition.format.video.nFrameHeight;
-    nAllocLen[1] = pExynosOutputPort->portDefinition.format.video.nFrameWidth * pExynosOutputPort->portDefinition.format.video.nFrameHeight / 2;
+    /* Use the actual codec buffer sizes (allocated with calc_plane in
+     * H264CodecDstSetup) instead of nFrameWidth * nFrameHeight, because
+     * the MFC kernel driver rejects QBUF with EFAULT if the dmabuf is
+     * smaller than the claimed allocLen. */
+    {
+        int i;
+        for (i = 0; i < MFC_OUTPUT_BUFFER_NUM_MAX; i++) {
+            if (pVideoDec->pMFCDecOutputBuffer[i] != NULL &&
+                pVideoDec->pMFCDecOutputBuffer[i]->pVirAddr[0] ==
+                    pDstInputData->buffer.multiPlaneBuffer.dataBuffer[0]) {
+                nAllocLen[0] = pVideoDec->pMFCDecOutputBuffer[i]->bufferSize[0];
+                nAllocLen[1] = pVideoDec->pMFCDecOutputBuffer[i]->bufferSize[1];
+                break;
+            }
+        }
+        if (i == MFC_OUTPUT_BUFFER_NUM_MAX) {
+            /* Fallback: use calc_plane for MB-aligned sizes */
+            nAllocLen[0] = calc_plane(
+                pExynosOutputPort->portDefinition.format.video.nFrameWidth,
+                pExynosOutputPort->portDefinition.format.video.nFrameHeight);
+            nAllocLen[1] = calc_plane(
+                pExynosOutputPort->portDefinition.format.video.nFrameWidth,
+                pExynosOutputPort->portDefinition.format.video.nFrameHeight >> 1);
+        }
+    }
 
     codecReturn = pOutbufOps->ExtensionEnqueue(hMFCHandle,
                                 (unsigned char **)pDstInputData->buffer.multiPlaneBuffer.dataBuffer,

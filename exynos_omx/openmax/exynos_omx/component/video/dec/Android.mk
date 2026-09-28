@@ -2,6 +2,7 @@ LOCAL_PATH := $(call my-dir)
 include $(CLEAR_VARS)
 
 LOCAL_CLANG_CFLAGS += -Wno-int-conversion
+LOCAL_CFLAGS += -Wno-unused-variable -Wno-unused-label -Wno-unused-parameter -Wno-implicit-function-declaration -Wno-sign-compare -Wno-enum-conversion -Wno-switch -Wno-incompatible-pointer-types -Wno-pointer-arith -Wno-parentheses-equality -DUSE_LOCAL_SEC_NV12TILED
 
 LOCAL_SRC_FILES := \
 	Exynos_OMX_VdecControl.c \
@@ -27,7 +28,7 @@ LOCAL_ADDITIONAL_DEPENDENCIES := \
 	$(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr
 
 ifeq ($(BOARD_USE_ANB), true)
-LOCAL_STATIC_LIBRARIES := libExynosOMX_OSAL libcsc_helper
+LOCAL_STATIC_LIBRARIES := libExynosOMX_OSAL
 LOCAL_CFLAGS += -DUSE_ANB
 endif
 

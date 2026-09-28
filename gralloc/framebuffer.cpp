@@ -24,8 +24,6 @@
 #include <hardware/hardware.h>
 #include <hardware/gralloc.h>
 
-#include <GLES/gl.h>
-
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/ioctl.h>
@@ -42,7 +40,6 @@
 #endif
 
 #include "gralloc_priv.h"
-#include "gralloc_vsync.h"
 
 inline size_t roundUpToPageSize(size_t x) {
     return (x + (PAGE_SIZE-1)) & ~(PAGE_SIZE-1);
@@ -108,10 +105,8 @@ static int fb_setSwapInterval(struct framebuffer_device_t* dev,
     m->swapInterval = interval;
 
     if (interval == 0 && vsync_state != 0) {
-        gralloc_vsync_disable(dev);
         vsync_state = 0;
     } else if (vsync_state != 1) {
-        gralloc_vsync_enable(dev);
         vsync_state = 1;
     }
 
@@ -271,7 +266,9 @@ static int fb_compositionComplete(struct framebuffer_device_t* dev __unused)
 {
     /* By doing a finish here we force the GL driver to start rendering
      all the drawcalls up to this point, and to wait for the rendering to be complete.*/
-    glFinish();
+    /* glFinish() removed - not available in this build, and the proprietary
+     * gralloc does not call it either. SurfaceFlinger uses hwcomposer for
+     * composition, not the framebuffer compositionComplete path. */
     /* The rendering of the backbuffer is now completed.
      When SurfaceFlinger later does a call to eglSwapBuffer(), the swap will be done
      synchronously in the same thread, and not asynchronoulsy in a background thread later.

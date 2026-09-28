@@ -101,6 +101,7 @@ static int handle_yuv_format(const int &ionfd, const int &w, const int &h, const
                 break;
             }
         case HAL_PIXEL_FORMAT_YV12:
+        case HAL_PIXEL_FORMAT_YCbCr_420_888:
         case HAL_PIXEL_FORMAT_YCrCb_420_SP:
             return gralloc_alloc_framework_yuv(ionfd, w, h, format, usage,
                                                ion_flags, hnd, stride);
@@ -125,6 +126,7 @@ static int handle_framework_yuv_format(const int &w, const int &h, const int &fo
 {
     switch (format) {
         case HAL_PIXEL_FORMAT_YV12:
+        case HAL_PIXEL_FORMAT_YCbCr_420_888:
             *stride = ALIGN(w, 16);
             *size = (*stride * h) + (ALIGN(*stride / 2, 16) * h);
             break;

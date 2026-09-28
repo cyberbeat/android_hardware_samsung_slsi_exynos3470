@@ -151,7 +151,8 @@ static int gralloc_unmap(gralloc_module_t const* module, buffer_handle_t handle)
 int getIonFd(gralloc_module_t const *module)
 {
     private_module_t* m = const_cast<private_module_t*>(reinterpret_cast<const private_module_t*>(module));
-    if (m->ionfd == -1)
+    ALOGI("getIonFd: ionfd=%d", m->ionfd);
+    if (m->ionfd <= 0)
         m->ionfd = ion_open();
     return m->ionfd;
 }
@@ -167,8 +168,8 @@ int gralloc_register_buffer(gralloc_module_t const* module,
         return -EINVAL;
 
     private_handle_t* hnd = (private_handle_t*)handle;
-    ALOGV("%s: base %p %d %d %d %d\n", __func__, hnd->base, hnd->size,
-          hnd->width, hnd->height, hnd->stride);
+    ALOGI("gralloc_register_buffer: fd=%d fd1=%d fd2=%d size=%d format=%d w=%d h=%d",
+          hnd->fd, hnd->fd1, hnd->fd2, hnd->size, hnd->format, hnd->width, hnd->height);
 
     int ret;
     ret = ion_import(getIonFd(module), hnd->fd, &hnd->handle);
@@ -185,6 +186,8 @@ int gralloc_register_buffer(gralloc_module_t const* module,
             ALOGE("error importing handle2 %d %x\n", hnd->fd2, hnd->format);
     }
 
+
+    gralloc_map(module, handle);
     return ret;
 }
 
@@ -231,10 +234,16 @@ int gralloc_lock(gralloc_module_t const* module,
         gralloc_map(module, hnd);
     *vaddr = (void*)hnd->base;
 
-    if (hnd->fd1 >= 0)
-        vaddr[1] = (void*)hnd->base1;
-    if (hnd->fd2 >= 0)
-        vaddr[2] = (void*)hnd->base2;
+    // NOTE: The standard gralloc0 lock() API only returns a single pointer
+    // via *vaddr (the Y/base plane).  Multi-plane YUV chroma pointers must
+    // NOT be written to vaddr[1]/vaddr[2] — the caller typically passes a
+    // pointer to a single void* on its stack (e.g. Gralloc0HalImpl::lock
+    // passes &data).  Writing vaddr[1]/vaddr[2] overwrites the caller's
+    // stack canary → __stack_chk_fail → SIGABRT.
+    //
+    // Callers that need chroma plane pointers must use lock_ycbcr() or
+    // derive them from the private_handle_t fields (base1/base2 for
+    // multi-plane, or offsets from base for single-plane NV21/YV12).
 
     return 0;
 }
@@ -249,7 +258,7 @@ int gralloc_unlock(gralloc_module_t const* module,
 
     private_handle_t* hnd = (private_handle_t*)handle;
 
-    if (!((hnd->flags & GRALLOC_USAGE_SW_READ_MASK) == GRALLOC_USAGE_SW_READ_OFTEN))
+    if (!((hnd->usage & GRALLOC_USAGE_SW_READ_MASK) == GRALLOC_USAGE_SW_READ_OFTEN))
         return 0;
 
     ion_sync_fd(getIonFd(module), hnd->fd);
@@ -259,4 +268,111 @@ int gralloc_unlock(gralloc_module_t const* module,
         ion_sync_fd(getIonFd(module), hnd->fd2);
 
     return 0;
+}
+
+int gralloc_lock_ycbcr(gralloc_module_t const* module,
+                       buffer_handle_t handle, int usage,
+                       int l, int t, int w, int h,
+                       struct android_ycbcr *ycbcr)
+{
+    if (private_handle_t::validate(handle) < 0)
+        return -EINVAL;
+
+    private_handle_t* hnd = (private_handle_t*)handle;
+    if (!hnd->base)
+        gralloc_map(module, hnd);
+
+    memset(ycbcr, 0, sizeof(*ycbcr));
+
+    if (hnd->format == HAL_PIXEL_FORMAT_YCrCb_420_SP) {
+        // NV21: Y plane + interleaved VU plane (single buffer)
+        // Layout: [Y: stride*vstride][VU: stride*(vstride/2)]
+        // NV21 = V comes first in each chroma pair, then U
+        uint8_t *base = (uint8_t *)hnd->base;
+        size_t ySize = hnd->stride * hnd->vstride;
+        ycbcr->y = base;
+        ycbcr->ystride = hnd->stride;
+        ycbcr->cstride = hnd->stride;
+        ycbcr->chroma_step = 2;  // interleaved VU pairs
+        // NV21: Cr (V) first, then Cb (U)
+        ycbcr->cr = base + ySize;       // V at even offsets
+        ycbcr->cb = base + ySize + 1;   // U at odd offsets
+        return 0;
+    }
+
+    if (hnd->format == HAL_PIXEL_FORMAT_YCbCr_420_888 ||
+        hnd->format == HAL_PIXEL_FORMAT_YV12) {
+        // Single-plane YV12 layout: [Y: stride*h][Cb: cstride*h][Cr: cstride*h]
+        // cstride = ALIGN(stride/2, 16)
+        uint8_t *base = (uint8_t *)hnd->base;
+        size_t ySize = hnd->stride * hnd->vstride;
+        size_t cStride = ALIGN(hnd->stride / 2, 16);
+        ycbcr->y = base;
+        ycbcr->ystride = hnd->stride;
+        ycbcr->cstride = cStride;
+        ycbcr->chroma_step = 1;  // separate Cb/Cr planes
+        // YV12: Cb plane first, then Cr plane
+        ycbcr->cb = base + ySize;
+        ycbcr->cr = base + ySize + cStride * hnd->vstride;
+        return 0;
+    }
+
+    // Multi-plane formats
+    if (hnd->fd1 >= 0) {
+        ycbcr->y = (void *)hnd->base;
+        ycbcr->ystride = hnd->stride;
+        if (hnd->fd2 >= 0) {
+            // 3-plane (YV12): Cb and Cr separate
+            ycbcr->cb = (void *)hnd->base1;
+            ycbcr->cr = (void *)hnd->base2;
+            ycbcr->cstride = hnd->stride / 2;
+            ycbcr->chroma_step = 1;
+        } else {
+            // 2-plane: interleaved chroma
+            // NV21M (EXYNOS_YCrCb_420_SP_M / _M_FULL): VU order → cr at even, cb at odd
+            // NV12M (EXYNOS_YCbCr_420_SP_M): UV order → cb at even, cr at odd
+            ycbcr->cstride = hnd->stride;
+            ycbcr->chroma_step = 2;
+            if (hnd->format == HAL_PIXEL_FORMAT_EXYNOS_YCrCb_420_SP_M ||
+                hnd->format == HAL_PIXEL_FORMAT_EXYNOS_YCrCb_420_SP_M_FULL) {
+                // NV21M: V first (even), U second (odd)
+                ycbcr->cr = (void *)hnd->base1;
+                ycbcr->cb = (uint8_t *)hnd->base1 + 1;
+            } else {
+                // NV12M: U first (even), V second (odd)
+                ycbcr->cb = (void *)hnd->base1;
+                ycbcr->cr = (uint8_t *)hnd->base1 + 1;
+            }
+        }
+        return 0;
+    }
+
+    return -EINVAL;
+}
+
+int gralloc_lockAsync(gralloc_module_t const* module,
+                      buffer_handle_t handle, int usage,
+                      int l, int t, int w, int h,
+                      void** vaddr, int fenceFd)
+{
+    if (fenceFd >= 0)
+        close(fenceFd);
+    return gralloc_lock(module, handle, usage, l, t, w, h, vaddr);
+}
+
+int gralloc_unlockAsync(gralloc_module_t const* module,
+                        buffer_handle_t handle, int* fenceFd)
+{
+    *fenceFd = -1;
+    return gralloc_unlock(module, handle);
+}
+
+int gralloc_lockAsync_ycbcr(gralloc_module_t const* module,
+                            buffer_handle_t handle, int usage,
+                            int l, int t, int w, int h,
+                            struct android_ycbcr *ycbcr, int fenceFd)
+{
+    if (fenceFd >= 0)
+        close(fenceFd);
+    return gralloc_lock_ycbcr(module, handle, usage, l, t, w, h, ycbcr);
 }

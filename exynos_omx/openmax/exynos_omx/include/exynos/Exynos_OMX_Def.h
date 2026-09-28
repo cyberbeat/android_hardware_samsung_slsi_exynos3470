@@ -31,7 +31,7 @@
 #include "OMX_IVCommon.h"
 
 #define VERSIONMAJOR_NUMBER                1
-#define VERSIONMINOR_NUMBER                1
+#define VERSIONMINOR_NUMBER                0
 #define REVISION_NUMBER                    2
 #define STEP_NUMBER                        0
 

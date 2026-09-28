@@ -1639,7 +1639,7 @@ static int exynos_gsc_out_run(void *handle,
     struct v4l2_plane  planes[NUM_OF_GSC_PLANES];
     struct v4l2_buffer buf;
     int32_t      src_color_space;
-    int32_t      src_planes;
+    int32_t      src_planes = 0;
     int             i;
     unsigned int plane_size[NUM_OF_GSC_PLANES];
 
@@ -1694,7 +1694,7 @@ static int exynos_gsc_out_run(void *handle,
         return -1;
     }
 
-    for (i = 0; i < buf.length; i++) {
+    for (i = 0; i < (int)buf.length; i++) {
         buf.m.planes[i].m.fd = (int)gsc_handle->src.addr[i];
         buf.m.planes[i].length    = plane_size[i];
         buf.m.planes[i].bytesused = plane_size[i];

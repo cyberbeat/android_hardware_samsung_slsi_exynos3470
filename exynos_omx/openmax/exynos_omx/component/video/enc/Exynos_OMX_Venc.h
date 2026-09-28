@@ -36,27 +36,43 @@
 #include "ExynosVideoApi.h"
 
 #define MAX_VIDEO_INPUTBUFFER_NUM    5
+#ifndef MAX_VIDEO_OUTPUTBUFFER_NUM
 #define MAX_VIDEO_OUTPUTBUFFER_NUM   4
+#endif
 
 #define DEFAULT_FRAME_WIDTH          176
 #define DEFAULT_FRAME_HEIGHT         144
 
+#ifndef DEFAULT_VIDEO_INPUT_BUFFER_SIZE
 #define DEFAULT_VIDEO_INPUT_BUFFER_SIZE    (ALIGN_TO_16B(DEFAULT_FRAME_WIDTH) * ALIGN_TO_16B(DEFAULT_FRAME_HEIGHT) + \
                                                                                 ALIGN((ALIGN_TO_16B(DEFAULT_FRAME_WIDTH) * ALIGN_TO_16B(DEFAULT_FRAME_HEIGHT))/2,256))
+#endif
+#ifndef DEFAULT_VIDEO_OUTPUT_BUFFER_SIZE
 #define DEFAULT_VIDEO_OUTPUT_BUFFER_SIZE   (DEFAULT_FRAME_WIDTH * DEFAULT_FRAME_HEIGHT) * 2
+#endif
 
 #define MFC_INPUT_BUFFER_NUM_MAX            3
+#ifndef MFC_OUTPUT_BUFFER_NUM_MAX
 #define MFC_OUTPUT_BUFFER_NUM_MAX           4
+#endif
 
 #define DEFAULT_MFC_INPUT_YBUFFER_SIZE      ALIGN_TO_16B(2560) * ALIGN_TO_16B(1600)
 #define DEFAULT_MFC_INPUT_CBUFFER_SIZE      ALIGN((DEFAULT_MFC_INPUT_YBUFFER_SIZE / 2), 256)
 #define DEFAULT_MFC_OUTPUT_BUFFER_SIZE      2560 * 1600 * 3 / 2
 
+#ifndef INPUT_PORT_SUPPORTFORMAT_NUM_MAX
 #define INPUT_PORT_SUPPORTFORMAT_NUM_MAX    5
+#endif
+#ifndef OUTPUT_PORT_SUPPORTFORMAT_NUM_MAX
 #define OUTPUT_PORT_SUPPORTFORMAT_NUM_MAX   1
+#endif
 
+#ifndef MFC_INPUT_BUFFER_PLANE
 #define MFC_INPUT_BUFFER_PLANE              2
+#endif
+#ifndef MFC_OUTPUT_BUFFER_PLANE
 #define MFC_OUTPUT_BUFFER_PLANE             1
+#endif
 
 #define MAX_INPUTBUFFER_NUM_DYNAMIC         0 /* Dynamic number of metadata buffer */
 
@@ -130,7 +146,7 @@ typedef struct _EXYNOS_OMX_VIDEOENC_COMPONENT
 extern "C" {
 #endif
 
-inline void Exynos_UpdateFrameSize(OMX_COMPONENTTYPE *pOMXComponent);
+void Exynos_UpdateFrameSize(OMX_COMPONENTTYPE *pOMXComponent);
 OMX_BOOL Exynos_Check_BufferProcess_State(EXYNOS_OMX_BASECOMPONENT *pExynosComponent, OMX_U32 nPortIndex);
 OMX_ERRORTYPE Exynos_Input_CodecBufferToData(EXYNOS_OMX_BASECOMPONENT *pExynosComponent, OMX_PTR codecBuffer, EXYNOS_OMX_DATA *pData);
 OMX_ERRORTYPE Exynos_Output_CodecBufferToData(EXYNOS_OMX_BASECOMPONENT *pExynosComponent, OMX_PTR codecBuffer, EXYNOS_OMX_DATA *pData);

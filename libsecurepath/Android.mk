@@ -29,7 +29,9 @@ LOCAL_SRC_FILES	+= 	\
 	content_protect.cpp \
 
 LOCAL_C_INCLUDES := $(TOP)/hardware/samsung_slsi-cm/exynos3470/include \
-                    $(TOP)/hardware/samsung_slsi-cm/exynos3470/mobicore/common/LogWrapper
+                    $(TOP)/hardware/samsung_slsi-cm/exynos3470/mobicore/common/LogWrapper \
+                    $(TOP)/hardware/samsung_slsi-cm/exynos3470/mobicore/daemon/ClientLib/public \
+                    $(TOP)/hardware/samsung_slsi-cm/exynos3470/mobicore/common/MobiCore/inc
 
 LOCAL_SHARED_LIBRARIES += libMcClient liblog
 

@@ -159,7 +159,6 @@ int searchLowPriority(EXYNOS_OMX_RM_COMPONENT_LIST *RMComp_list, OMX_U32 inComp_
     else
         ret = 1;
 
-EXIT:
     return ret;
 }
 
@@ -254,7 +253,7 @@ OMX_ERRORTYPE Exynos_OMX_ResourceManager_Deinit()
     ghVideoRMComponentListMutex = NULL;
 
     ret = OMX_ErrorNone;
-EXIT:
+
     FunctionOut();
 
     return ret;

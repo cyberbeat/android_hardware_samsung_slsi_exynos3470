@@ -30,6 +30,7 @@ LOCAL_SRC_FILES := \
 LOCAL_MODULE := libExynosOMX_Resourcemanager
 
 LOCAL_CFLAGS :=
+LOCAL_CFLAGS += -include $(EXYNOS_OMX_INC)/exynos/Exynos_OMX_Compat.h
 
 LOCAL_STATIC_LIBRARIES := libExynosOMX_OSAL
 LOCAL_SHARED_LIBRARIES := libcutils libutils

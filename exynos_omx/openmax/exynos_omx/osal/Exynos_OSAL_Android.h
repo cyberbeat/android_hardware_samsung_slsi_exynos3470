@@ -84,6 +84,8 @@ OMX_ERRORTYPE Exynos_OSAL_LockANBHandle(OMX_IN OMX_U32 pBuffer,
 
 OMX_ERRORTYPE Exynos_OSAL_UnlockANBHandle(OMX_IN OMX_U32 pBuffer);
 
+void Exynos_OSAL_Hal3Chroma_Release(int fd);
+
 OMX_ERRORTYPE Exynos_OSAL_GetInfoFromMetaData(OMX_IN OMX_BYTE pBuffer,
                                               OMX_OUT OMX_PTR *pOutBuffer);
 

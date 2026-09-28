@@ -472,6 +472,8 @@ static CSC_ERRORCODE conv_hw(
     switch (handle->csc_hw_type) {
 #ifdef ENABLE_FIMC
     case CSC_HW_TYPE_FIMC:
+        ALOGI("conv_hw: CSC_HANDLE=%p, csc_hw_handle (FIMC)=%p",
+              handle, handle->csc_hw_handle);
         if (exynos_fimc_convert(handle->csc_hw_handle) != 0) {
             ALOGE("%s:: exynos_fimc_convert() fail", __func__);
             ret = CSC_Error;
@@ -521,10 +523,15 @@ static CSC_ERRORCODE csc_init_hw(
         switch (csc_handle->csc_hw_type) {
 #ifdef ENABLE_FIMC
         case CSC_HW_TYPE_FIMC:
-            if (csc_handle->hw_property.fixed_node >= 0)
+            if (csc_handle->hw_property.fixed_node >= 0) {
+                ALOGI("csc_init_hw: creating FIMC exclusive node=%d", csc_handle->hw_property.fixed_node);
                 csc_handle->csc_hw_handle = exynos_fimc_create_exclusive(csc_handle->hw_property.fixed_node, FIMC_M2M_MODE, 0, 0);
-            else
-            csc_handle->csc_hw_handle = exynos_fimc_create();
+            } else {
+                ALOGI("csc_init_hw: creating FIMC auto-select");
+                csc_handle->csc_hw_handle = exynos_fimc_create();
+            }
+            ALOGI("csc_init_hw: CSC_HANDLE=%p, csc_hw_handle (FIMC)=%p, fixed_node=%d",
+                  csc_handle, csc_handle->csc_hw_handle, csc_handle->hw_property.fixed_node);
             ALOGV("%s:: CSC_HW_TYPE_FIMC", __func__);
             break;
 #endif
@@ -577,7 +584,33 @@ static CSC_ERRORCODE csc_set_format(
     if (csc_handle->csc_method == CSC_METHOD_HW) {
         switch (csc_handle->csc_hw_type) {
 #ifdef ENABLE_FIMC
-        case CSC_HW_TYPE_FIMC:
+        case CSC_HW_TYPE_FIMC: {
+            /* csc_set_format must run on every csc_convert_with_rotation:
+             * it calls exynos_fimc_set_src/dst_format, which set
+             * src.dirty=1 and dst.dirty=1.
+             *
+             * This is necessary because exynos_fimc_convert() calls
+             * m2m_stop() after each frame, which does STREAMOFF +
+             * REQBUFS(0).  On the next frame run_core() must therefore
+             * redo S_FMT + REQBUFS, which only happens when dirty=1.
+             *
+             * The previous fmt_changed cache was wrong — it prevented
+             * dirty from being set, causing a QBUF failure because no
+             * buffers were allocated anymore. */
+            ALOGI("csc_set_format: handle=%p hw_handle=%p hw_type=%d "
+                  "src=%dx%d fmt=0x%x dst=%dx%d fmt=0x%x",
+                  csc_handle, csc_handle->csc_hw_handle, csc_handle->csc_hw_type,
+                  csc_handle->src_format.width, csc_handle->src_format.height,
+                  csc_handle->src_format.color_format,
+                  csc_handle->dst_format.width, csc_handle->dst_format.height,
+                  csc_handle->dst_format.color_format);
+
+            ALOGI("csc_set_format: calling exynos_fimc_set_src_format(%p, %dx%d, crop=%dx%d, fmt=0x%x)",
+                  csc_handle->csc_hw_handle,
+                  ALIGN(csc_handle->src_format.width, FIMC_IMG_ALIGN_WIDTH),
+                  ALIGN(csc_handle->src_format.height, FIMC_IMG_ALIGN_HEIGHT),
+                  csc_handle->src_format.crop_width, csc_handle->src_format.crop_height,
+                  HAL_PIXEL_FORMAT_2_V4L2_PIX(csc_handle->src_format.color_format));
             exynos_fimc_set_src_format(
                 csc_handle->csc_hw_handle,
                 ALIGN(csc_handle->src_format.width, FIMC_IMG_ALIGN_WIDTH),
@@ -603,6 +636,7 @@ static CSC_ERRORCODE csc_set_format(
                 csc_handle->hw_property.mode_drm,
                 0);
             break;
+        }
 #endif
 #ifdef ENABLE_GSCALER
         case CSC_HW_TYPE_GSCALER:
@@ -690,6 +724,12 @@ static CSC_ERRORCODE csc_set_buffer(
         switch (csc_handle->csc_hw_type) {
 #ifdef ENABLE_FIMC
         case CSC_HW_TYPE_FIMC:
+            ALOGI("csc_set_buffer: hw_handle=%p src planes={%p,%p,%p} mem=%d dst planes={%p,%p,%p} mem=%d",
+                  csc_handle->csc_hw_handle,
+                  csc_handle->src_buffer.planes[0], csc_handle->src_buffer.planes[1], csc_handle->src_buffer.planes[2],
+                  csc_handle->src_buffer.mem_type,
+                  csc_handle->dst_buffer.planes[0], csc_handle->dst_buffer.planes[1], csc_handle->dst_buffer.planes[2],
+                  csc_handle->dst_buffer.mem_type);
             exynos_fimc_set_src_addr(csc_handle->csc_hw_handle, csc_handle->src_buffer.planes, csc_handle->src_buffer.mem_type, -1);
             exynos_fimc_set_dst_addr(csc_handle->csc_hw_handle, csc_handle->dst_buffer.planes, csc_handle->dst_buffer.mem_type, -1);
             break;

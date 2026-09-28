@@ -41,6 +41,7 @@
 #include "ion.h"
 #include "ExynosVideoApi.h"
 #include "ExynosVideoDec.h"
+#include "videodev2_exynos_media_ext.h"
 #include "OMX_Core.h"
 
 /* #define LOG_NDEBUG 0 */
@@ -48,6 +49,10 @@
 #include <utils/Log.h>
 
 #define MAX_OUTPUTBUFFER_COUNT 32
+
+#ifndef V4L2_BUF_FLAG_LAST_FRAME
+#define V4L2_BUF_FLAG_LAST_FRAME 0x00020000
+#endif
 
 /*
  * [Common] __CodingType_To_V4L2PixelFormat

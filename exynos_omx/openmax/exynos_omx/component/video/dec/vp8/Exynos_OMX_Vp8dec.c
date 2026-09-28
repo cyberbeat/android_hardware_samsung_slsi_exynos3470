@@ -598,7 +598,7 @@ OMX_ERRORTYPE VP8CodecEnQueueAllBuffer(OMX_COMPONENTTYPE *pOMXComponent, OMX_U32
             Exynos_OSAL_Log(EXYNOS_LOG_TRACE, "pVideoDec->pMFCDecInputBuffer[%d]: 0x%x", i, pVideoDec->pMFCDecInputBuffer[i]);
             Exynos_OSAL_Log(EXYNOS_LOG_TRACE, "pVideoDec->pMFCDecInputBuffer[%d]->pVirAddr[0]: 0x%x", i, pVideoDec->pMFCDecInputBuffer[i]->pVirAddr[0]);
 
-            Exynos_CodecBufferEnQueue(pExynosComponent, INPUT_PORT_INDEX, pVideoDec->pMFCDecInputBuffer[i]);
+            Exynos_CodecBufferEnqueue(pExynosComponent, INPUT_PORT_INDEX, pVideoDec->pMFCDecInputBuffer[i]);
         }
 
         pInbufOps->Clear_Queue(hMFCHandle);
@@ -612,7 +612,7 @@ OMX_ERRORTYPE VP8CodecEnQueueAllBuffer(OMX_COMPONENTTYPE *pOMXComponent, OMX_U32
         nOutbufs = pDecOps->Get_ActualBufferCount(hMFCHandle);
         nOutbufs += EXTRA_DPB_NUM;
         for (i = 0; i < nOutbufs; i++) {
-            Exynos_CodecBufferEnQueue(pExynosComponent, OUTPUT_PORT_INDEX, pVideoDec->pMFCDecOutputBuffer[i]);
+            Exynos_CodecBufferEnqueue(pExynosComponent, OUTPUT_PORT_INDEX, pVideoDec->pMFCDecOutputBuffer[i]);
         }
         pOutbufOps->Clear_Queue(hMFCHandle);
     } else {
@@ -1345,7 +1345,7 @@ OMX_ERRORTYPE Exynos_VP8Dec_Init(OMX_COMPONENTTYPE *pOMXComponent)
             goto EXIT;
 
         for (i = 0; i < MFC_INPUT_BUFFER_NUM_MAX; i++)
-            Exynos_CodecBufferEnQueue(pExynosComponent, INPUT_PORT_INDEX, pVideoDec->pMFCDecInputBuffer[i]);
+            Exynos_CodecBufferEnqueue(pExynosComponent, INPUT_PORT_INDEX, pVideoDec->pMFCDecInputBuffer[i]);
     } else if (pExynosInputPort->bufferProcessType == BUFFER_SHARE) {
         /*************/
         /*    TBD    */

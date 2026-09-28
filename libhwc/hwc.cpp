@@ -375,7 +375,7 @@ static bool exynos5_supports_gscaler(hwc_layer_1_t &layer, int format,
         dest_h = HEIGHT(layer.displayFrame);
     }
 
-    if (handle->flags & GRALLOC_USAGE_PROTECTED)
+    if (handle->usage & GRALLOC_USAGE_PROTECTED)
         align_crop_and_center(dest_w, dest_h, NULL,
                 GSC_DST_CROP_W_ALIGNMENT_RGB888);
 
@@ -1046,7 +1046,7 @@ static int exynos5_prepare_hdmi(exynos5_hwc_composer_device_1_t *pdev,
 
         if (layer.handle) {
             private_handle_t *h = private_handle_t::dynamicCast(layer.handle);
-            if (h->flags & GRALLOC_USAGE_PROTECTED) {
+            if (h->usage & GRALLOC_USAGE_PROTECTED) {
                 if (!video_layer) {
                     video_layer = &layer;
                     layer.compositionType = HWC_OVERLAY;
@@ -1131,7 +1131,7 @@ static int exynos5_config_gsc_m2m(hwc_layer_1_t &layer,
         src_cfg.vaddr = src_handle->fd2;
     }
     src_cfg.format = src_handle->format;
-    src_cfg.drmMode = !!(src_handle->flags & GRALLOC_USAGE_PROTECTED);
+    src_cfg.drmMode = !!(src_handle->usage & GRALLOC_USAGE_PROTECTED);
     src_cfg.acquireFenceFd = layer.acquireFenceFd;
     layer.acquireFenceFd = -1;
 
@@ -1158,7 +1158,7 @@ static int exynos5_config_gsc_m2m(hwc_layer_1_t &layer,
                 GRALLOC_USAGE_SW_WRITE_NEVER |
                 GRALLOC_USAGE_HW_COMPOSER;
 
-        if (src_handle->flags & GRALLOC_USAGE_PROTECTED)
+        if (src_handle->usage & GRALLOC_USAGE_PROTECTED)
             usage |= GRALLOC_USAGE_PROTECTED;
 
         int w = ALIGN(dst_cfg.w, GSC_DST_W_ALIGNMENT_RGB888);

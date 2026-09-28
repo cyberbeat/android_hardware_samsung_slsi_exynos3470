@@ -873,7 +873,7 @@ EXIT:
     return retBuffer;
 }
 
-OMX_ERRORTYPE Exynos_CodecBufferEnQueue(EXYNOS_OMX_BASECOMPONENT *pExynosComponent, OMX_U32 PortIndex, OMX_PTR data)
+OMX_ERRORTYPE Exynos_CodecBufferEnqueue(EXYNOS_OMX_BASECOMPONENT *pExynosComponent, OMX_U32 PortIndex, OMX_PTR data)
 {
     OMX_ERRORTYPE       ret = OMX_ErrorNone;
     EXYNOS_OMX_BASEPORT   *pExynosPort = NULL;
@@ -902,7 +902,7 @@ EXIT:
     return ret;
 }
 
-OMX_ERRORTYPE Exynos_CodecBufferDeQueue(EXYNOS_OMX_BASECOMPONENT *pExynosComponent, OMX_U32 PortIndex, OMX_PTR *data)
+OMX_ERRORTYPE Exynos_CodecBufferDequeue(EXYNOS_OMX_BASECOMPONENT *pExynosComponent, OMX_U32 PortIndex, OMX_PTR *data)
 {
     OMX_ERRORTYPE       ret = OMX_ErrorNone;
     EXYNOS_OMX_BASEPORT   *pExynosPort = NULL;
@@ -913,7 +913,7 @@ OMX_ERRORTYPE Exynos_CodecBufferDeQueue(EXYNOS_OMX_BASECOMPONENT *pExynosCompone
     pExynosPort = &pExynosComponent->pExynosPort[PortIndex];
     Exynos_OSAL_SemaphoreWait(pExynosPort->codecSemID);
     tempData = (OMX_U32)Exynos_OSAL_Dequeue(&pExynosPort->codecBufferQ);
-    if (tempData == NULL) {
+    if (tempData == 0) {
         *data = NULL;
         ret = OMX_ErrorUndefined;
         goto EXIT;

@@ -43,6 +43,14 @@
 #include "ExynosVideoApi.h"
 #include "ExynosVideoEnc.h"
 
+/* Exynos MFC extension controls (FMO, ASO, hierarchical coding, SEI frame packing)
+ * defined in videodev2_exynos_media_ext.h.  This header is not installed into
+ * KERNEL_OBJ/usr/include; a copy lives next to ExynosVideoApi.h so it is found
+ * via the existing LOCAL_C_INCLUDES entry for this include/ directory.
+ * Must be included after ExynosVideoApi.h (which pulls in exynos_v4l2.h)
+ * so that V4L2_CID_MPEG_MFC_BASE is already defined. */
+#include "videodev2_exynos_media_ext.h"
+
 /* #define LOG_NDEBUG 0 */
 #define LOG_TAG "ExynosVideoEncoder"
 #include <utils/Log.h>
@@ -938,7 +946,7 @@ EXIT:
 /*
  * [Encoder Buffer OPS] Get Buffer (Input)
  */
-static ExynosVideoErrorType MFC_Encoder_Get_Buffer_Inbuf(
+static ExynosVideoErrorType __attribute__((unused)) MFC_Encoder_Get_Buffer_Inbuf(
     void               *pHandle,
     int                 nIndex,
     ExynosVideoBuffer **pBuffer)
@@ -1526,7 +1534,7 @@ EXIT:
 /*
  * [Encoder Buffer OPS] Wait (Src)
  */
-static ExynosVideoErrorType MFC_Encoder_Wait_Inbuf(void *pHandle)
+static ExynosVideoErrorType __attribute__((unused)) MFC_Encoder_Wait_Inbuf(void *pHandle)
 {
     ExynosVideoEncContext *pCtx = (ExynosVideoEncContext *)pHandle;
     ExynosVideoErrorType   ret  = VIDEO_ERROR_NONE;
@@ -1568,7 +1576,7 @@ EXIT:
 /*
  * [Encoder Buffer OPS] Wait (Dst)
  */
-static ExynosVideoErrorType MFC_Encoder_Wait_Outbuf(void *pHandle)
+static ExynosVideoErrorType __attribute__((unused)) MFC_Encoder_Wait_Outbuf(void *pHandle)
 {
     ExynosVideoEncContext *pCtx = (ExynosVideoEncContext *)pHandle;
     ExynosVideoErrorType   ret  = VIDEO_ERROR_NONE;
@@ -1953,7 +1961,7 @@ EXIT:
 /*
  * [Encoder Buffer OPS] Enqueue All (Output)
  */
-static ExynosVideoErrorType MFC_Encoder_Enqueue_All_Outbuf(void *pHandle)
+static ExynosVideoErrorType __attribute__((unused)) MFC_Encoder_Enqueue_All_Outbuf(void *pHandle)
 {
     ExynosVideoEncContext *pCtx = (ExynosVideoEncContext *)pHandle;
     ExynosVideoErrorType   ret  = VIDEO_ERROR_NONE;
@@ -2037,7 +2045,6 @@ static ExynosVideoBuffer *MFC_Encoder_Dequeue_Outbuf(void *pHandle)
 
     struct v4l2_buffer buf;
     struct v4l2_plane  planes[VIDEO_ENCODER_OUTBUF_PLANES];
-    int value;
 
     if (pCtx == NULL) {
         ALOGE("%s: Video context info must be supplied", __func__);

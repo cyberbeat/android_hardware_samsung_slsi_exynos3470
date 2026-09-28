@@ -32,6 +32,7 @@
 #include <stdarg.h>
 #include <fcntl.h>
 #include <string.h>
+#include <stdlib.h>
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
@@ -369,6 +370,18 @@ static int __v4l2_s_fmt(int fd, unsigned int request, struct v4l2_format *fmt)
         ALOGE("%s: unsupported buffer type", __func__);
         return ret;
     } else {
+        if (V4L2_TYPE_IS_MULTIPLANAR(fmt->type)) {
+            ALOGI("V4L2_S_FMT: fd=%d type=%d mp=%dx%d fmt=0x%x planes=%d",
+                  fd, fmt->type,
+                  fmt->fmt.pix_mp.width, fmt->fmt.pix_mp.height,
+                  fmt->fmt.pix_mp.pixelformat,
+                  fmt->fmt.pix_mp.num_planes);
+        } else {
+            ALOGI("V4L2_S_FMT: fd=%d type=%d sp=%dx%d fmt=0x%x",
+                  fd, fmt->type,
+                  fmt->fmt.pix.width, fmt->fmt.pix.height,
+                  fmt->fmt.pix.pixelformat);
+        }
         ret = ioctl(fd, request, fmt);
         if (ret) {
             if (request == VIDIOC_TRY_FMT)
@@ -425,6 +438,9 @@ int exynos_v4l2_reqbufs(int fd, struct v4l2_requestbuffers *req)
     }
 
     count = req->count;
+
+    ALOGI("V4L2_REQBUFS: fd=%d type=%d count=%d memory=%d",
+          fd, req->type, req->count, req->memory);
 
     ret = ioctl(fd, VIDIOC_REQBUFS, req);
     if (ret) {
@@ -505,6 +521,99 @@ int exynos_v4l2_qbuf(int fd, struct v4l2_buffer *buf)
     if (__v4l2_check_buf_type(buf->type) == false) {
         ALOGE("%s: unsupported buffer type", __func__);
         return ret;
+    }
+
+    ALOGI("V4L2_QBUF: fd=%d buf=%p type=%d memory=%d index=%d num_planes=%d "
+          "bytesused=%d flags=0x%x field=%d sequence=%d input=%d reserved=%d",
+          fd, buf, buf->type, buf->memory, buf->index, buf->length,
+          buf->bytesused, buf->flags, buf->field, buf->sequence,
+          buf->input, buf->reserved);
+
+    /* One-time diagnostic: log struct sizes and offsets */
+    {
+        static int once = 0;
+        if (!once) {
+            once = 1;
+            ALOGI("DIAG: sizeof(v4l2_buffer)=%zu sizeof(v4l2_plane)=%zu sizeof(timeval)=%zu",
+                  sizeof(struct v4l2_buffer), sizeof(struct v4l2_plane), sizeof(struct timeval));
+            ALOGI("DIAG: offsetof idx=%zu type=%zu flags=%zu mem=%zu m=%zu len=%zu input=%zu reserved=%zu",
+                  (size_t)&buf->index - (size_t)buf,
+                  (size_t)&buf->type - (size_t)buf,
+                  (size_t)&buf->flags - (size_t)buf,
+                  (size_t)&buf->memory - (size_t)buf,
+                  (size_t)&buf->m - (size_t)buf,
+                  (size_t)&buf->length - (size_t)buf,
+                  (size_t)&buf->input - (size_t)buf,
+                  (size_t)&buf->reserved - (size_t)buf);
+        }
+    }
+
+    if (buf->m.planes) {
+        ALOGI("  m.planes=%p (buf@%p + 0x%lx)", buf->m.planes, buf,
+              (unsigned long)((char *)&buf->m.planes - (char *)buf));
+        for (int i = 0; i < (int)buf->length; i++) {
+            ALOGI("  plane[%d]: fd=%d len=%d used=%d data_offset=%d userptr=0x%lx mem_offset=%d",
+                  i, buf->m.planes[i].m.fd, buf->m.planes[i].length,
+                  buf->m.planes[i].bytesused, buf->m.planes[i].data_offset,
+                  (unsigned long)buf->m.planes[i].m.userptr,
+                  buf->m.planes[i].m.mem_offset);
+        }
+        /* Diagnostic: verify planes memory is accessible by writing to it.
+         * If this crashes, the planes pointer is invalid.
+         * If this succeeds but ioctl returns EFAULT, the issue is in the kernel. */
+        volatile __u32 *test = &buf->m.planes[0].reserved[0];
+        __u32 orig = *test;
+        *test = 0xDEADBEEF;
+        *test = orig;
+        ALOGI("  planes memory read/write test OK (wrote+restored reserved[0])");
+    } else {
+        ALOGI("  m.planes=NULL (no planes pointer!)");
+    }
+
+    /* Workaround: The proprietary FIMC sets V4L2_BUF_FLAG_USE_SYNC (0x2000).
+     * Clear it to avoid sync fence issues. */
+    if (buf->flags & 0x2000) {
+        buf->flags &= ~0x2000;
+        buf->reserved = 0;
+    }
+
+    /* Workaround: The FIMC object's internal v4l2_buffer/planes cause EFAULT
+     * in the kernel's copy_from_user/copy_to_user. Use a heap-allocated copy
+     * instead, then copy results back. */
+    if (V4L2_TYPE_IS_MULTIPLANAR(buf->type) && buf->m.planes && buf->length > 0 && buf->length <= 8) {
+        struct v4l2_buffer *heap_buf;
+        struct v4l2_plane *heap_planes;
+        size_t buf_sz = sizeof(struct v4l2_buffer);
+        size_t planes_sz = sizeof(struct v4l2_plane) * buf->length;
+
+        heap_buf = (struct v4l2_buffer *)malloc(buf_sz);
+        heap_planes = (struct v4l2_plane *)malloc(planes_sz);
+        if (heap_buf && heap_planes) {
+            memcpy(heap_buf, buf, buf_sz);
+            memcpy(heap_planes, buf->m.planes, planes_sz);
+            heap_buf->m.planes = heap_planes;
+
+            ret = ioctl(fd, VIDIOC_QBUF, heap_buf);
+            if (ret) {
+                ALOGE("failed to ioctl: VIDIOC_QBUF (%d - %s)", errno, strerror(errno));
+            } else {
+                /* Copy results back to original buffer */
+                memcpy(buf->m.planes, heap_planes, planes_sz);
+                buf->bytesused = heap_buf->bytesused;
+                buf->flags = heap_buf->flags;
+                buf->field = heap_buf->field;
+                buf->sequence = heap_buf->sequence;
+                buf->timestamp = heap_buf->timestamp;
+                buf->reserved = heap_buf->reserved;
+            }
+            free(heap_planes);
+            free(heap_buf);
+            Exynos_v4l2_Out();
+            return ret;
+        }
+        if (heap_planes) free(heap_planes);
+        if (heap_buf) free(heap_buf);
+        ALOGE("malloc failed for QBUF copy, falling through");
     }
 
     ret = ioctl(fd, VIDIOC_QBUF, buf);

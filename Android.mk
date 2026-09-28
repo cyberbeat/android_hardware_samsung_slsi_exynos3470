@@ -27,12 +27,17 @@ exynos3_dirs := \
         libv4l2 \
         gralloc \
         libhwjpeg \
-        libcsc
+        libcsc \
+        libexynosfimc_patch \
+        libcamera2_g800f \
+        exynos_omx
 #        libcamera2
 ##        mobicore \
 ##        libgscaler \
 ##        libhwc \
 ##        libcsc
+# libgscaler auskommentiert: Exynos 3470 hat kein GSC, und libMcClient fehlt.
+# FIMC M2M (über libcsc mit ENABLE_FIMC) wird stattdessen verwendet.
 
 BOARD_USE_V4L2 := true
 BOARD_USE_V4L2_ION := true

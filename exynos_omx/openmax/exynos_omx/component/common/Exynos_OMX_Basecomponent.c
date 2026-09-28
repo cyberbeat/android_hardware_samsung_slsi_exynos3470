@@ -62,8 +62,7 @@ OMX_ERRORTYPE Exynos_OMX_Check_SizeVersion(OMX_PTR header, OMX_U32 size)
         ret = OMX_ErrorBadParameter;
         goto EXIT;
     }
-    if (version->s.nVersionMajor != VERSIONMAJOR_NUMBER ||
-        version->s.nVersionMinor != VERSIONMINOR_NUMBER) {
+    if (version->s.nVersionMajor != VERSIONMAJOR_NUMBER) {
         ret = OMX_ErrorVersionMismatch;
         goto EXIT;
     }
@@ -172,7 +171,6 @@ OMX_ERRORTYPE Exynos_OMX_ComponentStateSet(OMX_COMPONENTTYPE *pOMXComponent, OMX
     OMX_STATETYPE             destState = messageParam;
     OMX_STATETYPE             currentState = pExynosComponent->currentState;
     EXYNOS_OMX_BASEPORT      *pExynosPort = NULL;
-    OMX_S32                   countValue = 0;
     unsigned int              i = 0, j = 0;
     int                       k = 0;
 
@@ -696,7 +694,6 @@ static OMX_ERRORTYPE Exynos_StateSet(EXYNOS_OMX_BASECOMPONENT *pExynosComponent,
 static OMX_ERRORTYPE Exynos_SetPortFlush(EXYNOS_OMX_BASECOMPONENT *pExynosComponent, OMX_U32 nParam)
 {
     OMX_ERRORTYPE        ret = OMX_ErrorNone;
-    EXYNOS_OMX_BASEPORT *pExynosPort = NULL;
     OMX_S32              portIndex = nParam;
     OMX_U16              i = 0, cnt = 0, index = 0;
 
@@ -735,7 +732,7 @@ static OMX_ERRORTYPE Exynos_SetPortEnable(EXYNOS_OMX_BASECOMPONENT *pExynosCompo
     OMX_ERRORTYPE        ret = OMX_ErrorNone;
     EXYNOS_OMX_BASEPORT *pExynosPort = NULL;
     OMX_S32              portIndex = nParam;
-    OMX_U16              i = 0, cnt = 0;
+    OMX_U16              i = 0;
 
     FunctionIn();
 
@@ -778,7 +775,7 @@ static OMX_ERRORTYPE Exynos_SetPortDisable(EXYNOS_OMX_BASECOMPONENT *pExynosComp
     OMX_ERRORTYPE        ret = OMX_ErrorNone;
     EXYNOS_OMX_BASEPORT *pExynosPort = NULL;
     OMX_S32              portIndex = nParam;
-    OMX_U16              i = 0, cnt = 0;
+    OMX_U16              i = 0;
 
     FunctionIn();
 
@@ -814,9 +811,6 @@ EXIT:
 static OMX_ERRORTYPE Exynos_SetMarkBuffer(EXYNOS_OMX_BASECOMPONENT *pExynosComponent, OMX_U32 nParam)
 {
     OMX_ERRORTYPE        ret = OMX_ErrorNone;
-    EXYNOS_OMX_BASEPORT *pExynosPort = NULL;
-    OMX_U32              portIndex = nParam;
-    OMX_U16              i = 0, cnt = 0;
 
 
     if (nParam >= pExynosComponent->portParam.nPorts) {
@@ -872,7 +866,6 @@ OMX_ERRORTYPE Exynos_OMX_SendCommand(
     OMX_ERRORTYPE             ret = OMX_ErrorNone;
     OMX_COMPONENTTYPE        *pOMXComponent = NULL;
     EXYNOS_OMX_BASECOMPONENT *pExynosComponent = NULL;
-    EXYNOS_OMX_MESSAGE       *message = NULL;
 
     FunctionIn();
 
@@ -1480,6 +1473,12 @@ OMX_ERRORTYPE Exynos_OMX_UseEGLImage(
     OMX_IN OMX_PTR                   pAppPrivate,
     OMX_IN void                     *eglImage)
 {
+    (void)hComponent;
+    (void)ppBufferHdr;
+    (void)nPortIndex;
+    (void)pAppPrivate;
+    (void)eglImage;
+
     return OMX_ErrorNotImplemented;
 }
 
@@ -1575,7 +1574,7 @@ OMX_ERRORTYPE Exynos_OMX_BaseComponent_Destructor(
     }
     pExynosComponent = (EXYNOS_OMX_BASECOMPONENT *)pOMXComponent->pComponentPrivate;
 
-    Exynos_OMX_CommandQueue(pExynosComponent, EXYNOS_OMX_CommandComponentDeInit, 0, NULL);
+    Exynos_OMX_CommandQueue(pExynosComponent, (OMX_COMMANDTYPE)EXYNOS_OMX_CommandComponentDeInit, 0, NULL);
     Exynos_OSAL_SleepMillisec(0);
     Exynos_OSAL_Get_SemaphoreCount(pExynosComponent->msgSemaphoreHandle, &semaValue);
     if (semaValue == 0)

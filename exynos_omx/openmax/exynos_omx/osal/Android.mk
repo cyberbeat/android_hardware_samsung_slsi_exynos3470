@@ -19,6 +19,8 @@ LOCAL_SRC_FILES := \
 LOCAL_MODULE := libExynosOMX_OSAL
 
 LOCAL_CFLAGS :=
+LOCAL_CFLAGS += -DUSE_LOCAL_SEC_NV12TILED
+LOCAL_CFLAGS += -include $(EXYNOS_OMX_INC)/exynos/Exynos_OMX_Compat.h
 
 LOCAL_CLANG_CFLAGS += \
 	-Wno-implicit-function-declaration \

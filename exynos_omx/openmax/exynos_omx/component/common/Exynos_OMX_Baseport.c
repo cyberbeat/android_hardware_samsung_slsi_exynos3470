@@ -83,7 +83,6 @@ OMX_ERRORTYPE Exynos_OMX_OutputBufferReturn(OMX_COMPONENTTYPE *pOMXComponent, OM
     Exynos_OSAL_MutexUnlock(pExynosPort->hPortMutex);
     pExynosComponent->pCallbacks->FillBufferDone(pOMXComponent, pExynosComponent->callbackData, bufferHeader);
 
-EXIT:
     Exynos_OSAL_Log(EXYNOS_LOG_TRACE, "%s : %d, bufferHeader:0x%x", __FUNCTION__, __LINE__, bufferHeader);
     return ret;
 }
@@ -92,9 +91,7 @@ OMX_ERRORTYPE Exynos_OMX_BufferFlushProcess(OMX_COMPONENTTYPE *pOMXComponent, OM
 {
     OMX_ERRORTYPE             ret = OMX_ErrorNone;
     EXYNOS_OMX_BASECOMPONENT *pExynosComponent = NULL;
-    EXYNOS_OMX_BASEPORT      *pExynosPort = NULL;
     OMX_S32                   portIndex = 0;
-    EXYNOS_OMX_DATABUFFER    *flushPortBuffer[2] = {NULL, NULL};
     OMX_U32                   i = 0, cnt = 0;
 
     FunctionIn();
@@ -144,7 +141,6 @@ OMX_ERRORTYPE Exynos_OMX_EnablePort(OMX_COMPONENTTYPE *pOMXComponent, OMX_S32 po
     OMX_ERRORTYPE          ret = OMX_ErrorNone;
     EXYNOS_OMX_BASECOMPONENT *pExynosComponent = (EXYNOS_OMX_BASECOMPONENT *)pOMXComponent->pComponentPrivate;
     EXYNOS_OMX_BASEPORT      *pExynosPort = NULL;
-    OMX_U32                i = 0, cnt = 0;
 
     FunctionIn();
 
@@ -229,7 +225,6 @@ OMX_ERRORTYPE Exynos_OMX_DisablePort(OMX_COMPONENTTYPE *pOMXComponent, OMX_S32 p
     OMX_ERRORTYPE          ret = OMX_ErrorNone;
     EXYNOS_OMX_BASECOMPONENT *pExynosComponent = (EXYNOS_OMX_BASECOMPONENT *)pOMXComponent->pComponentPrivate;
     EXYNOS_OMX_BASEPORT      *pExynosPort = NULL;
-    OMX_U32                i = 0, elemNum = 0;
     EXYNOS_OMX_MESSAGE       *message;
 
     FunctionIn();
@@ -264,10 +259,8 @@ OMX_ERRORTYPE Exynos_OMX_PortDisableProcess(OMX_COMPONENTTYPE *pOMXComponent, OM
 {
     OMX_ERRORTYPE          ret = OMX_ErrorNone;
     EXYNOS_OMX_BASECOMPONENT *pExynosComponent = NULL;
-    EXYNOS_OMX_BASEPORT      *pExynosPort = NULL;
     OMX_S32                portIndex = 0;
     OMX_U32                i = 0, cnt = 0;
-    EXYNOS_OMX_DATABUFFER    *flushPortBuffer[2] = {NULL, NULL};
 
     FunctionIn();
 
@@ -546,7 +539,6 @@ OMX_ERRORTYPE Exynos_OMX_Port_Constructor(OMX_HANDLETYPE hComponent)
     EXYNOS_OMX_BASEPORT      *pExynosPort = NULL;
     EXYNOS_OMX_BASEPORT      *pExynosInputPort = NULL;
     EXYNOS_OMX_BASEPORT      *pExynosOutputPort = NULL;
-    int i = 0;
 
     FunctionIn();
 
@@ -786,7 +778,6 @@ OMX_ERRORTYPE Exynos_OMX_Port_Destructor(OMX_HANDLETYPE hComponent)
     EXYNOS_OMX_BASECOMPONENT *pExynosComponent = NULL;
     EXYNOS_OMX_BASEPORT      *pExynosPort = NULL;
 
-    OMX_S32 countValue = 0;
     int i = 0;
 
     FunctionIn();

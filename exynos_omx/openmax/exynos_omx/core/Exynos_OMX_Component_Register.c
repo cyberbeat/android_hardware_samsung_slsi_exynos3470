@@ -48,10 +48,8 @@
 OMX_ERRORTYPE Exynos_OMX_Component_Register(EXYNOS_OMX_COMPONENT_REGLIST **compList, OMX_U32 *compNum)
 {
     OMX_ERRORTYPE  ret = OMX_ErrorNone;
-    int            componentNum = 0, roleNum = 0, totalCompNum = 0;
-    int            read;
+    int            componentNum = 0, totalCompNum = 0;
     char          *libName;
-    size_t         len;
     const char    *errorMsg;
     DIR           *dir;
     struct dirent *d;
@@ -143,7 +141,6 @@ OMX_ERRORTYPE Exynos_OMX_Component_Unregister(EXYNOS_OMX_COMPONENT_REGLIST *comp
 
     Exynos_OSAL_Free(componentList);
 
-EXIT:
     return ret;
 }
 

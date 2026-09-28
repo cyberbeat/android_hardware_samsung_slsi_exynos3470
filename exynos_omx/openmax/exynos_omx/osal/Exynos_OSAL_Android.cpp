@@ -50,12 +50,43 @@
 #include "exynos_format.h"
 #include "ion.h"
 
+#include <sys/mman.h>
+#include <pthread.h>
+#include <stdint.h>
+
 #undef  EXYNOS_LOG_TAG
 #define EXYNOS_LOG_TAG    "Exynos_OSAL_Android"
 #define EXYNOS_LOG_OFF
 #include "Exynos_OSAL_Log.h"
 
 using namespace android;
+
+/*
+ * HAL3 single-plane NV21 → NV12M chroma buffer management.
+ *
+ * Problem: HAL3 allocates video buffers as single-plane NV21 with
+ * fd1=-1 (no separate chroma fd). The MFC hardware encoder expects
+ * 2-plane NV12M with separate dmabuf fds for Y and UV planes.
+ *
+ * Solution: When LockANBHandle detects fd1<0 (single-plane NV21 from
+ * HAL3), allocate a separate ION buffer for the chroma plane, copy
+ * the chroma data from the NV21 buffer with VU→UV byte reordering
+ * (NV21 YCrCb → NV12 YCbCr), and return the chroma fd as plane 1.
+ *
+ * Lifetime: The chroma buffer is registered in a side-table keyed by
+ * fd. It survives Lock→Unlock→Enqueue→MFC→Dequeue. It is freed by
+ * Exynos_OSAL_Hal3Chroma_Release(fd) called from the OMX component
+ * layer after V4L2 DQBUF, when the MFC has released the buffer.
+ */
+#define HAL3_CHROMA_REGISTRY_SIZE 32
+struct Hal3ChromaEntry {
+    int     chroma_fd;    /* dmabuf fd for chroma plane */
+    void   *chroma_addr;  /* mmap'd address of chroma plane */
+    size_t  chroma_size;  /* allocated size in bytes */
+};
+static struct Hal3ChromaEntry g_hal3_chroma_registry[HAL3_CHROMA_REGISTRY_SIZE];
+static pthread_mutex_t g_hal3_chroma_mutex = PTHREAD_MUTEX_INITIALIZER;
+static ion_client g_hal3_ion_client = -1;
 
 #ifdef __cplusplus
 extern "C" {
@@ -89,7 +120,7 @@ OMX_ERRORTYPE Exynos_OSAL_LockANBHandle(
 
     int usage = 0;
 
-    switch (format) {
+    switch ((OMX_U32)format) {
     case OMX_COLOR_FormatYUV420Planar:
     case OMX_COLOR_FormatYUV420SemiPlanar:
     case OMX_SEC_COLOR_FormatNV12Tiled:
@@ -109,12 +140,152 @@ OMX_ERRORTYPE Exynos_OSAL_LockANBHandle(
     vplanes[0].fd = priv_hnd->fd;
     vplanes[0].offset = 0;
     vplanes[0].addr = vaddr[0];
-    vplanes[1].fd = priv_hnd->fd1;
-    vplanes[1].offset = 0;
-    vplanes[1].addr = vaddr[1];
-    vplanes[2].fd = priv_hnd->fd2;
-    vplanes[2].offset = 0;
-    vplanes[2].addr = vaddr[2];
+    vplanes[0].allocSize = 0;
+    vplanes[0].dataSize = 0;
+
+    if (priv_hnd->fd1 < 0) {
+        /*
+         * HAL3 single-plane NV21 path.
+         *
+         * The framework allocated this buffer with sNumFds=1, so fd1=-1
+         * after Binder transfer. The MFC encoder requires 2-plane NV12M
+         * with separate dmabuf fds. Allocate a chroma ION buffer, copy
+         * the interleaved chroma data from the NV21 buffer, and reorder
+         * VU→UV (NV21 YCrCb → NV12 YCbCr) for MFC compatibility.
+         *
+         * The chroma buffer is registered in g_hal3_chroma_registry.
+         * It is freed by Exynos_OSAL_Hal3Chroma_Release(fd) after the
+         * MFC has dequeued the input buffer (V4L2 DQBUF).
+         */
+        size_t y_size = (size_t)priv_hnd->stride * (size_t)priv_hnd->vstride;
+        size_t chroma_copy_size = y_size / 2;
+        /*
+         * The MFC encoder calculates nAllocLen[1] = ALIGN(ALIGN_TO_16B(w) *
+         * ALIGN_TO_16B(h) / 2, 256) and passes it as buf.m.planes[1].length
+         * to V4L2 QBUF. The kernel validates length <= dmabuf_size.
+         * If the chroma dmabuf is smaller than nAllocLen[1], QBUF returns
+         * EFAULT (14 - Bad address).
+         *
+         * For 1920x1080: stride=1920, vstride=1080, but ALIGN_TO_16B(1080)=1088,
+         * so nAllocLen[1] = ALIGN(1920*1088/2, 256) = 1044480, while
+         * chroma_copy_size = 1920*1080/2 = 1036800. The 7680-byte gap causes
+         * EFAULT. Allocate the aligned size to match MFC expectations.
+         */
+        size_t aligned_h = ((size_t)priv_hnd->vstride + 15) & ~15;
+        size_t chroma_size = (size_t)priv_hnd->stride * aligned_h / 2;
+        chroma_size = (chroma_size + 255) & ~255;  /* ALIGN to 256 */
+
+        pthread_mutex_lock(&g_hal3_chroma_mutex);
+
+        if (g_hal3_ion_client < 0) {
+            g_hal3_ion_client = ion_client_create();
+            /* Initialize registry fds to -1 (static init gives 0 = stdin) */
+            for (int i = 0; i < HAL3_CHROMA_REGISTRY_SIZE; i++)
+                g_hal3_chroma_registry[i].chroma_fd = -1;
+        }
+
+        /* Find a free registry slot */
+        struct Hal3ChromaEntry *entry = NULL;
+        for (int i = 0; i < HAL3_CHROMA_REGISTRY_SIZE; i++) {
+            if (g_hal3_chroma_registry[i].chroma_fd < 0) {
+                entry = &g_hal3_chroma_registry[i];
+                break;
+            }
+        }
+        if (entry == NULL) {
+            Exynos_OSAL_Log(EXYNOS_LOG_ERROR,
+                "HAL3 chroma registry full (%d entries)", HAL3_CHROMA_REGISTRY_SIZE);
+            pthread_mutex_unlock(&g_hal3_chroma_mutex);
+            ret = OMX_ErrorUndefined;
+            goto EXIT;
+        }
+
+        /* Allocate chroma ION buffer */
+        entry->chroma_fd = ion_alloc(g_hal3_ion_client, chroma_size, 0,
+                                     ION_HEAP_SYSTEM_MASK, 0);
+        if (entry->chroma_fd < 0) {
+            Exynos_OSAL_Log(EXYNOS_LOG_ERROR,
+                "HAL3 chroma ion_alloc failed: %d", entry->chroma_fd);
+            entry->chroma_fd = -1;
+            entry->chroma_addr = NULL;
+            entry->chroma_size = 0;
+            pthread_mutex_unlock(&g_hal3_chroma_mutex);
+            ret = OMX_ErrorUndefined;
+            goto EXIT;
+        }
+        entry->chroma_addr = mmap(NULL, chroma_size,
+                                   PROT_READ | PROT_WRITE, MAP_SHARED,
+                                   entry->chroma_fd, 0);
+        if (entry->chroma_addr == MAP_FAILED) {
+            Exynos_OSAL_Log(EXYNOS_LOG_ERROR,
+                "HAL3 chroma mmap failed (size=%zu)", chroma_size);
+            ion_free(entry->chroma_fd);
+            entry->chroma_fd = -1;
+            entry->chroma_addr = NULL;
+            entry->chroma_size = 0;
+            pthread_mutex_unlock(&g_hal3_chroma_mutex);
+            ret = OMX_ErrorUndefined;
+            goto EXIT;
+        }
+        entry->chroma_size = chroma_size;
+
+        /*
+         * Copy chroma: NV21 (VU interleaved) → NV12 (UV interleaved).
+         * Source chroma starts at offset stride*vstride in the NV21
+         * buffer (see grallocGetPlanePtrs in G800FCamera2Device.cpp).
+         * Swap every byte pair: V,U → U,V.
+         */
+        {
+            uint8_t *src = (uint8_t *)vaddr[0] + y_size;
+            uint8_t *dst = (uint8_t *)entry->chroma_addr;
+            size_t i;
+            /* Only copy chroma_copy_size bytes (actual chroma data);
+             * chroma_size may be larger due to alignment padding. */
+            for (i = 0; i + 4 <= chroma_copy_size; i += 4) {
+                uint32_t v = *(uint32_t *)(src + i);
+                *(uint32_t *)(dst + i) =
+                    ((v >> 8) & 0x00FF00FF) | ((v & 0x00FF00FF) << 8);
+            }
+            for (; i < chroma_copy_size; i += 2) {
+                dst[i]     = src[i + 1];
+                dst[i + 1] = src[i];
+            }
+        }
+
+        /* Flush CPU cache so MFC DMA can read the chroma data */
+        ion_sync(g_hal3_ion_client, entry->chroma_fd);
+
+        vplanes[1].fd = entry->chroma_fd;
+        vplanes[1].offset = 0;
+        vplanes[1].addr = entry->chroma_addr;
+        vplanes[1].allocSize = (unsigned int)chroma_size;
+        vplanes[1].dataSize = (unsigned int)chroma_size;
+
+        vplanes[2].fd = -1;
+        vplanes[2].offset = 0;
+        vplanes[2].addr = NULL;
+        vplanes[2].allocSize = 0;
+        vplanes[2].dataSize = 0;
+
+        Exynos_OSAL_Log(EXYNOS_LOG_INFO,
+            "HAL3 NV21→NV12M: chroma fd=%d size=%zu "
+            "(Y fd=%d stride=%d vstride=%d)",
+            entry->chroma_fd, chroma_size,
+            priv_hnd->fd, priv_hnd->stride, priv_hnd->vstride);
+
+        pthread_mutex_unlock(&g_hal3_chroma_mutex);
+    } else {
+        vplanes[1].fd = priv_hnd->fd1;
+        vplanes[1].offset = 0;
+        vplanes[1].addr = vaddr[1];
+        vplanes[1].allocSize = 0;
+        vplanes[1].dataSize = 0;
+        vplanes[2].fd = priv_hnd->fd2;
+        vplanes[2].offset = 0;
+        vplanes[2].addr = vaddr[2];
+        vplanes[2].allocSize = 0;
+        vplanes[2].dataSize = 0;
+    }
 
     *pStride = priv_hnd->stride;
 
@@ -150,6 +321,42 @@ EXIT:
     return ret;
 }
 
+/*
+ * Release a HAL3 chroma buffer by fd.
+ *
+ * Called from the OMX component layer after V4L2 DQBUF, when the MFC
+ * has finished processing the input buffer. If the fd was registered
+ * by LockANBHandle as a HAL3 chroma buffer, it is munmap'd and ion_free'd.
+ * If the fd is not in the registry (e.g. a real gralloc multi-plane fd),
+ * this is a no-op.
+ */
+void Exynos_OSAL_Hal3Chroma_Release(int fd)
+{
+    if (fd < 0)
+        return;
+
+    pthread_mutex_lock(&g_hal3_chroma_mutex);
+
+    for (int i = 0; i < HAL3_CHROMA_REGISTRY_SIZE; i++) {
+        if (g_hal3_chroma_registry[i].chroma_fd == fd) {
+            Exynos_OSAL_Log(EXYNOS_LOG_INFO,
+                "HAL3 chroma release fd=%d size=%zu",
+                fd, g_hal3_chroma_registry[i].chroma_size);
+            if (g_hal3_chroma_registry[i].chroma_addr &&
+                g_hal3_chroma_registry[i].chroma_addr != MAP_FAILED)
+                munmap(g_hal3_chroma_registry[i].chroma_addr,
+                       g_hal3_chroma_registry[i].chroma_size);
+            ion_free(fd);
+            g_hal3_chroma_registry[i].chroma_fd = -1;
+            g_hal3_chroma_registry[i].chroma_addr = NULL;
+            g_hal3_chroma_registry[i].chroma_size = 0;
+            break;
+        }
+    }
+
+    pthread_mutex_unlock(&g_hal3_chroma_mutex);
+}
+
 OMX_COLOR_FORMATTYPE Exynos_OSAL_GetANBColorFormat(OMX_IN OMX_U32 handle)
 {
     FunctionIn();
@@ -160,7 +367,6 @@ OMX_COLOR_FORMATTYPE Exynos_OSAL_GetANBColorFormat(OMX_IN OMX_U32 handle)
     ret = Exynos_OSAL_Hal2OMXPixelFormat(priv_hnd->format);
     Exynos_OSAL_Log(EXYNOS_LOG_TRACE, "ColorFormat: 0x%x", ret);
 
-EXIT:
     FunctionOut();
 
     return ret;
@@ -175,7 +381,6 @@ OMX_U32 Exynos_OSAL_GetANBStride(OMX_IN OMX_U32 handle)
 
     nStride = priv_hnd->stride;
 
-EXIT:
     FunctionOut();
 
     return nStride;
@@ -199,7 +404,6 @@ OMX_ERRORTYPE Exynos_OSAL_LockMetaData(
         ret = Exynos_OSAL_LockANBHandle((OMX_U32)pBuf, width, height, format, pStride, planes);
     }
 
-EXIT:
     FunctionOut();
 
     return ret;
@@ -216,7 +420,6 @@ OMX_ERRORTYPE Exynos_OSAL_UnlockMetaData(OMX_IN OMX_PTR pBuffer)
     if (ret == OMX_ErrorNone)
         ret = Exynos_OSAL_UnlockANBHandle((OMX_U32)pBuf);
 
-EXIT:
     FunctionOut();
 
     return ret;
@@ -581,7 +784,7 @@ OMX_ERRORTYPE Exynos_OSAL_GetANBParameter(
         goto EXIT;
     }
 
-    switch (nIndex) {
+    switch ((EXYNOS_OMX_INDEXTYPE)nIndex) {
     case OMX_IndexParamGetAndroidNativeBuffer:
     {
         GetAndroidNativeBufferUsageParams *pANBParams = (GetAndroidNativeBufferUsageParams *) ComponentParameterStructure;
@@ -660,10 +863,11 @@ OMX_ERRORTYPE Exynos_OSAL_SetANBParameter(
         goto EXIT;
     }
 
-    switch (nIndex) {
+    switch ((EXYNOS_OMX_INDEXTYPE)nIndex) {
     case OMX_IndexParamEnableAndroidBuffers:
     {
         EXYNOS_OMX_VIDEODEC_COMPONENT *pVideoDec = (EXYNOS_OMX_VIDEODEC_COMPONENT *)pExynosComponent->hComponentHandle;
+        (void)pVideoDec;
         EnableAndroidNativeBuffersParams *pANBParams = (EnableAndroidNativeBuffersParams *) ComponentParameterStructure;
         OMX_U32 portIndex = pANBParams->nPortIndex;
         EXYNOS_OMX_BASEPORT *pExynosPort = NULL;
@@ -709,6 +913,7 @@ OMX_ERRORTYPE Exynos_OSAL_SetANBParameter(
     case OMX_IndexParamUseAndroidNativeBuffer:
     {
         EXYNOS_OMX_VIDEODEC_COMPONENT *pVideoDec = (EXYNOS_OMX_VIDEODEC_COMPONENT *)pExynosComponent->hComponentHandle;
+        (void)pVideoDec;
         UseAndroidNativeBufferParams *pANBParams = (UseAndroidNativeBufferParams *) ComponentParameterStructure;
         OMX_U32 portIndex = pANBParams->nPortIndex;
         EXYNOS_OMX_BASEPORT *pExynosPort = NULL;
@@ -787,8 +992,10 @@ OMX_ERRORTYPE Exynos_OSAL_SetANBParameter(
         pExynosPort->bStoreMetaData = pANBParams->bStoreMetaData;
         if (pExynosComponent->codecType == HW_VIDEO_ENC_CODEC) {
             EXYNOS_OMX_VIDEOENC_COMPONENT *pVideoEnc = (EXYNOS_OMX_VIDEOENC_COMPONENT *)pExynosComponent->hComponentHandle;;
+            (void)pVideoEnc;
         } else if (pExynosComponent->codecType == HW_VIDEO_DEC_CODEC) {
             EXYNOS_OMX_VIDEODEC_COMPONENT *pVideoDec = (EXYNOS_OMX_VIDEODEC_COMPONENT *)pExynosComponent->hComponentHandle;;
+            (void)pVideoDec;
             if ((portIndex == OUTPUT_PORT_INDEX) &&
                 (pExynosPort->bStoreMetaData == OMX_TRUE) &&
                 ((pExynosPort->bufferProcessType & BUFFER_ANBSHARE) == BUFFER_ANBSHARE)) {
@@ -870,7 +1077,6 @@ OMX_ERRORTYPE Exynos_OSAL_GetInfoFromMetaData(OMX_IN OMX_BYTE pBuffer,
         ppBuf[0] = (OMX_PTR)pBufHandle;
     }
 
-EXIT:
     FunctionOut();
 
     return ret;
@@ -903,20 +1109,17 @@ OMX_COLOR_FORMATTYPE Exynos_OSAL_Hal2OMXPixelFormat(
     case HAL_PIXEL_FORMAT_YCbCr_422_I:
         omx_format = OMX_COLOR_FormatYCbYCr;
         break;
-    case HAL_PIXEL_FORMAT_YCbCr_420_P:
+    case HAL_PIXEL_FORMAT_YV12:
         omx_format = OMX_COLOR_FormatYUV420Planar;
         break;
-    case HAL_PIXEL_FORMAT_YCbCr_420_SP:
+    case HAL_PIXEL_FORMAT_YCRCB_420_SP:
         omx_format = OMX_COLOR_FormatYUV420SemiPlanar;
         break;
-    case HAL_PIXEL_FORMAT_CUSTOM_YCbCr_420_SP_TILED:
-        omx_format = (OMX_COLOR_FORMATTYPE)OMX_SEC_COLOR_FormatNV12TPhysicalAddress;
-        break;
-    case HAL_PIXEL_FORMAT_YCbCr_420_SP_TILED:
+    case HAL_PIXEL_FORMAT_EXYNOS_YCbCr_420_SP_M_TILED:
         omx_format = (OMX_COLOR_FORMATTYPE)OMX_SEC_COLOR_FormatNV12Tiled;
         break;
     case HAL_PIXEL_FORMAT_BGRA_8888:
-    case HAL_PIXEL_FORMAT_CUSTOM_ARGB_8888:
+    case HAL_PIXEL_FORMAT_EXYNOS_ARGB_8888:
         omx_format = OMX_COLOR_Format32bitARGB8888;
         break;
     default:
@@ -930,27 +1133,25 @@ unsigned int Exynos_OSAL_OMX2HalPixelFormat(
     OMX_COLOR_FORMATTYPE omx_format)
 {
     unsigned int hal_format;
-    switch (omx_format) {
+    switch ((OMX_U32)omx_format) {
     case OMX_COLOR_FormatYCbYCr:
         hal_format = HAL_PIXEL_FORMAT_YCbCr_422_I;
         break;
     case OMX_COLOR_FormatYUV420Planar:
-        hal_format = HAL_PIXEL_FORMAT_YCbCr_420_P;
+        hal_format = HAL_PIXEL_FORMAT_YV12;
         break;
     case OMX_COLOR_FormatYUV420SemiPlanar:
-        hal_format = HAL_PIXEL_FORMAT_YCbCr_420_SP;
+        hal_format = HAL_PIXEL_FORMAT_YCRCB_420_SP;
         break;
     case OMX_SEC_COLOR_FormatNV12TPhysicalAddress:
-        hal_format = HAL_PIXEL_FORMAT_CUSTOM_YCbCr_420_SP_TILED;
-        break;
     case OMX_SEC_COLOR_FormatNV12Tiled:
-        hal_format = HAL_PIXEL_FORMAT_YCbCr_420_SP_TILED;
+        hal_format = HAL_PIXEL_FORMAT_EXYNOS_YCbCr_420_SP_M_TILED;
         break;
     case OMX_COLOR_Format32bitARGB8888:
-        hal_format = HAL_PIXEL_FORMAT_CUSTOM_ARGB_8888;
+        hal_format = HAL_PIXEL_FORMAT_EXYNOS_ARGB_8888;
         break;
     default:
-        hal_format = HAL_PIXEL_FORMAT_YCbCr_420_P;
+        hal_format = HAL_PIXEL_FORMAT_YV12;
         break;
     }
     return hal_format;

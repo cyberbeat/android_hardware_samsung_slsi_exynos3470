@@ -66,7 +66,6 @@ OMX_ERRORTYPE Exynos_OSAL_MutexTerminate(OMX_HANDLETYPE mutexHandle)
 OMX_ERRORTYPE Exynos_OSAL_MutexLock(OMX_HANDLETYPE mutexHandle)
 {
     pthread_mutex_t *mutex = (pthread_mutex_t *)mutexHandle;
-    int result;
 
     if (mutex == NULL)
         return OMX_ErrorBadParameter;
@@ -80,7 +79,6 @@ OMX_ERRORTYPE Exynos_OSAL_MutexLock(OMX_HANDLETYPE mutexHandle)
 OMX_ERRORTYPE Exynos_OSAL_MutexUnlock(OMX_HANDLETYPE mutexHandle)
 {
     pthread_mutex_t *mutex = (pthread_mutex_t *)mutexHandle;
-    int result;
 
     if (mutex == NULL)
         return OMX_ErrorBadParameter;

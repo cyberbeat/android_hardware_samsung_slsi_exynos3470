@@ -70,6 +70,8 @@ int fb_device_open(const hw_module_t* module, const char* name,
 static int gralloc_device_open(const hw_module_t* module, const char* name,
                                hw_device_t** device);
 
+extern int getIonFd(gralloc_module_t const *module);
+
 extern int gralloc_lock(gralloc_module_t const* module,
                         buffer_handle_t handle, int usage,
                         int l, int t, int w, int h,
@@ -77,6 +79,24 @@ extern int gralloc_lock(gralloc_module_t const* module,
 
 extern int gralloc_unlock(gralloc_module_t const* module,
                           buffer_handle_t handle);
+
+extern int gralloc_lock_ycbcr(gralloc_module_t const* module,
+                              buffer_handle_t handle, int usage,
+                              int l, int t, int w, int h,
+                              struct android_ycbcr *ycbcr);
+
+extern int gralloc_lockAsync(gralloc_module_t const* module,
+                             buffer_handle_t handle, int usage,
+                             int l, int t, int w, int h,
+                             void** vaddr, int fenceFd);
+
+extern int gralloc_unlockAsync(gralloc_module_t const* module,
+                               buffer_handle_t handle, int* fenceFd);
+
+extern int gralloc_lockAsync_ycbcr(gralloc_module_t const* module,
+                                   buffer_handle_t handle, int usage,
+                                   int l, int t, int w, int h,
+                                   struct android_ycbcr *ycbcr, int fenceFd);
 
 extern int gralloc_register_buffer(gralloc_module_t const* module,
                                    buffer_handle_t handle);
@@ -105,13 +125,16 @@ struct private_module_t HAL_MODULE_INFO_SYM = {
     .unregisterBuffer = gralloc_unregister_buffer,
     .lock = gralloc_lock,
     .unlock = gralloc_unlock,
+    .lock_ycbcr = gralloc_lock_ycbcr,
+    .lockAsync = gralloc_lockAsync,
+    .unlockAsync = gralloc_unlockAsync,
+    .lockAsync_ycbcr = gralloc_lockAsync_ycbcr,
 },
 .framebuffer = 0,
 .flags = 0,
 .numBuffers = 0,
 .bufferMask = 0,
 .lock = PTHREAD_MUTEX_INITIALIZER,
-.refcount = 0,
 .currentBuffer = 0,
 .ionfd = -1,
 };
@@ -126,8 +149,6 @@ static unsigned int _select_heap(int usage)
     else
         heap_mask = ION_HEAP_SYSTEM_MASK;
 
-    if (usage & GRALLOC_USAGE_HW_RENDER)
-        heap_mask = ION_HEAP_EXYNOS_CONTIG_MASK;
 
     return heap_mask;
 }
@@ -180,19 +201,11 @@ static int gralloc_alloc_rgb(int ionfd, int w, int h, int format, int usage,
     }
 
     if (format != HAL_PIXEL_FORMAT_BLOB) {
-        if ((usage & GRALLOC_USAGE_HW_VIDEO_ENCODER) || (format == HAL_PIXEL_FORMAT_BGRA_8888)) {
-            bpr = ALIGN(w, 16)* bpp;
-            vstride = ALIGN(h, 16);
-        } else {
-            bpr = ALIGN(w*bpp, 64);
-            vstride = h;
-        }
-        if (vstride < h + 2)
-            size = bpr * (h + 2);
-        else
-            size = bpr * vstride;
+        bpr = ALIGN(w, 16) * bpp;
+        vstride = ALIGN(h, 16);
+        size = bpr * vstride;
         *stride = bpr / bpp;
-        size = ALIGN(size, PAGE_SIZE)+ext_size;
+        size = ALIGN(size, PAGE_SIZE);
     }
 
     if (usage & GRALLOC_USAGE_PROTECTED) {
@@ -210,22 +223,23 @@ static int gralloc_alloc_rgb(int ionfd, int w, int h, int format, int usage,
             ion_flags |= ION_EXYNOS_FIMD_VIDEO_MASK;
     }
 
+
     err = ion_alloc_fd(ionfd, size, alignment, heap_mask, ion_flags,
                        &fd);
     if (err) {
-        if (usage & GRALLOC_USAGE_HW_RENDER) {
-            usage &= ~GRALLOC_USAGE_HW_RENDER;
-            heap_mask = _select_heap(usage);
-            err = ion_alloc_fd(ionfd, size, alignment, heap_mask, ion_flags,
-                                &fd);
-            if (err)
-                return err;
-        }
-        else
-            return err;
+        ALOGE("gralloc_alloc_rgb: ion_alloc_fd failed err=%d size=%zu heap=0x%x flags=0x%x", err, size, heap_mask, ion_flags);
+        return err;
     }
-    *hnd = new private_handle_t(fd, size, usage, w, h, format, *stride,
+    ALOGI("gralloc_alloc_rgb: OK fd=%d size=%zu bpp=%d stride=%d heap=0x%x", fd, size, bpp, *stride, heap_mask);
+    *hnd = new private_handle_t(fd, size, usage | 0x08000000, w, h, format, *stride,
                                 vstride);
+    ALOGI("handle_dump: version=%d numFds=%d numInts=%d fd=%d fd1=%d fd2=%d magic=0x%x usage=0x%x size=%d offset=%d offset1=%d format=%d w=%d h=%d stride=%d vstride=%d base=%p base1=%p base2=%p handle=%d handle1=%d handle2=%d",
+          (*hnd)->version, (*hnd)->numFds, (*hnd)->numInts,
+          (*hnd)->fd, (*hnd)->fd1, (*hnd)->fd2, (*hnd)->magic, (*hnd)->usage,
+          (*hnd)->size, (*hnd)->offset, (*hnd)->offset1, (*hnd)->format,
+          (*hnd)->width, (*hnd)->height, (*hnd)->stride, (*hnd)->vstride,
+          (*hnd)->base, (*hnd)->base1, (*hnd)->base2,
+          (*hnd)->handle, (*hnd)->handle1, (*hnd)->handle2);
 
     return err;
 }
@@ -241,8 +255,11 @@ static int gralloc_alloc_framework_yuv(int ionfd, int w, int h, int format,
     switch (format) {
         case HAL_PIXEL_FORMAT_YV12:
         case HAL_PIXEL_FORMAT_EXYNOS_YCbCr_420_P:
+        case HAL_PIXEL_FORMAT_YCbCr_420_888:
             *stride = ALIGN(w, 16);
-            size = (*stride * h) + (ALIGN(*stride / 2, 16) * h) + ext_size;
+            // YV12 layout: Y plane + Cb plane + Cr plane (all separate)
+            // size = stride*h + cstride*h + cstride*h
+            size = (*stride * h) + (ALIGN(*stride / 2, 16) * h) * 2 + ext_size;
             break;
         case HAL_PIXEL_FORMAT_YCrCb_420_SP:
             *stride = w;
@@ -257,7 +274,7 @@ static int gralloc_alloc_framework_yuv(int ionfd, int w, int h, int format,
     if (err)
         return err;
 
-    *hnd = new private_handle_t(fd, size, usage, w, h, format, *stride, h);
+    *hnd = new private_handle_t(fd, size, usage | 0x08000000, w, h, format, *stride, h);
     return err;
 }
 
@@ -307,6 +324,7 @@ static int gralloc_alloc_yuv(int ionfd, int w, int h, int format,
             }
         case HAL_PIXEL_FORMAT_YV12:
         case HAL_PIXEL_FORMAT_EXYNOS_YCbCr_420_P:
+        case HAL_PIXEL_FORMAT_YCbCr_420_888:
         case HAL_PIXEL_FORMAT_YCrCb_420_SP:
             return gralloc_alloc_framework_yuv(ionfd, w, h, format, usage,
                                                ion_flags, hnd, stride);
@@ -337,7 +355,7 @@ static int gralloc_alloc_yuv(int ionfd, int w, int h, int format,
     if (err)
         return err;
     if (planes == 1) {
-        *hnd = new private_handle_t(fd, luma_size, usage, w, h,
+        *hnd = new private_handle_t(fd, luma_size, usage | 0x08000000, w, h,
                                     format, *stride, luma_vstride);
     } else {
         err = ion_alloc_fd(ionfd, chroma_size, 0, heap_mask, ion_flags, &fd1);
@@ -348,10 +366,10 @@ static int gralloc_alloc_yuv(int ionfd, int w, int h, int format,
             if (err)
                 goto err2;
 
-            *hnd = new private_handle_t(fd, fd1, fd2, luma_size, usage, w, h,
+            *hnd = new private_handle_t(fd, fd1, fd2, luma_size, usage | 0x08000000, w, h,
                                         format, *stride, luma_vstride);
         } else {
-            *hnd = new private_handle_t(fd, fd1, luma_size, usage, w, h, format,
+            *hnd = new private_handle_t(fd, fd1, luma_size, usage | 0x08000000, w, h, format,
                                         *stride, luma_vstride);
         }
     }
@@ -373,6 +391,8 @@ static int gralloc_alloc(alloc_device_t* dev,
     unsigned int ion_flags = 0;
     private_handle_t *hnd = NULL;
 
+    ALOGI("gralloc_alloc: w=%d h=%d format=%d usage=0x%08x", w, h, format, usage);
+
     if (!pHandle || !pStride || w <= 0 || h <= 0)
         return -EINVAL;
 
@@ -384,21 +404,20 @@ static int gralloc_alloc(alloc_device_t* dev,
     gralloc_module_t* module = reinterpret_cast<gralloc_module_t*>
         (dev->common.module);
 
-    if ((usage & GRALLOC_USAGE_HW_RENDER) && (w*h != (m->xres)*(m->yres)))
-        usage &= ~GRALLOC_USAGE_HW_RENDER;
-
-    err = gralloc_alloc_rgb(m->ionfd, w, h, format, usage, ion_flags, &hnd,
+    err = gralloc_alloc_rgb(getIonFd(module), w, h, format, usage, ion_flags, &hnd,
                             &stride);
     if (err)
-        err = gralloc_alloc_yuv(m->ionfd, w, h, format, usage, ion_flags,
+        err = gralloc_alloc_yuv(getIonFd(module), w, h, format, usage, ion_flags,
                                 &hnd, &stride);
     if (err)
         goto err;
 
     *pHandle = hnd;
     *pStride = stride;
+    ALOGI("gralloc_alloc: OK hnd=%p fd=%d size=%d stride=%d", hnd, hnd->fd, hnd->size, stride);
     return 0;
 err:
+    ALOGE("gralloc_alloc: FAIL err=%d hnd=%p", err, hnd);
     if (!hnd)
         return err;
     close(hnd->fd);
@@ -438,14 +457,6 @@ static int gralloc_close(struct hw_device_t *dev)
 {
     gralloc_context_t* ctx = reinterpret_cast<gralloc_context_t*>(dev);
     if (ctx) {
-        private_module_t *p = reinterpret_cast<private_module_t*>(ctx->device.common.module);
-        pthread_mutex_lock(&p->lock);
-        LOG_ALWAYS_FATAL_IF(!p->refcount);
-        p->refcount--;
-        if (!p->refcount)
-            close(p->ionfd);
-        pthread_mutex_unlock(&p->lock);
-
         /* TODO: keep a list of all buffer_handle_t created, and free them
          * all here.
          */
@@ -458,6 +469,7 @@ int gralloc_device_open(const hw_module_t* module, const char* name,
                         hw_device_t** device)
 {
     int status = -EINVAL;
+    ALOGI("gralloc_device_open: name=%s", name);
     if (!strcmp(name, GRALLOC_HARDWARE_GPU0)) {
         gralloc_context_t *dev;
         dev = (gralloc_context_t*)malloc(sizeof(*dev));
@@ -474,17 +486,10 @@ int gralloc_device_open(const hw_module_t* module, const char* name,
         dev->device.alloc = gralloc_alloc;
         dev->device.free = gralloc_free;
 
-        private_module_t *p = reinterpret_cast<private_module_t*>(dev->device.common.module);
-        pthread_mutex_lock(&p->lock);
-        if (!p->refcount)
-            p->ionfd = ion_open();
-        p->refcount++;
-        pthread_mutex_unlock(&p->lock);
-
         *device = &dev->device.common;
         status = 0;
     } else {
-        ALOGE("client name %s is not GRALLOC_HARDWARE_GPU0", name);
+        status = fb_device_open(module, name, device);
     }
     return status;
 }

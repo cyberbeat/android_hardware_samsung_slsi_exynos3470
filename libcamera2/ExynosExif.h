@@ -233,4 +233,9 @@ typedef struct {
     uint16_t compression_scheme;
 } exif_attribute_t;
 
+typedef struct {
+    char *debugData;
+    unsigned int debugSize;
+} debug_attribute_t;
+
 #endif /* EXYNOS_EXIF_H_ */

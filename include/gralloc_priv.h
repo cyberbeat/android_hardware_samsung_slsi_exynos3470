@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ *      http://www.apache.org/licenses-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -43,8 +43,7 @@ struct private_module_t {
     uint32_t numBuffers;
     uint32_t bufferMask;
     pthread_mutex_t lock;
-    unsigned int refcount;
-    buffer_handle_t currentBuffer;
+    buffer_handle_t currentBuffer;  /* offset 196 — fb buffer-swap tracking */
     int ionfd;
 
     struct fb_var_screeninfo info;
@@ -82,10 +81,10 @@ struct private_handle_t {
     int     fd2;
     // ints
     int     magic;
-    int     flags;
+    int     usage;
     int     size;
     int     offset;
-
+    int     offset1;
     int     format;
     int     width;
     int     height;
@@ -102,12 +101,19 @@ struct private_handle_t {
 
 #ifdef __cplusplus
     static const int sNumFds = 3;
-    static const int sNumInts = 34;
+    static const int sNumInts = 16;
     static const int sMagic = 0x3141592;
 
-    private_handle_t(int fd, int size, int flags) :
-        fd(fd), fd1(-1), fd2(-1), magic(sMagic), flags(flags), size(size),
-        offset(0), format(0), width(0), height(0), stride(0),
+    /* The native_handle layout uses numFds + numInts to determine how
+     * many file descriptors and integers follow the 3-word header.
+     * Binder only translates the first numFds ints as fds; the rest
+     * are passed as plain ints. By varying numFds/numInts per
+     * constructor, unused fd slots (fd1, fd2) are transmitted as
+     * ints (value -1) instead of fds, so Binder does not try to
+     * translate them. This matches the proprietary gralloc ABI. */
+    private_handle_t(int fd, int size, int usage) :
+        fd(fd), fd1(-1), fd2(-1), magic(sMagic), usage(usage), size(size),
+        offset(0), offset1(0), format(0), width(0), height(0), stride(0),
         vstride(0), base(0), base1(0), base2(0), handle(0), handle1(0),
         handle2(0)
     {
@@ -116,36 +122,36 @@ struct private_handle_t {
         numFds = sNumFds - 2;
     }
 
-    private_handle_t(int fd, int size, int flags, int w,
-		     int h, int format, int stride, int vstride) :
-        fd(fd), fd1(-1), fd2(-1), magic(sMagic), flags(flags), size(size),
-        offset(0), format(format), width(w), height(h), stride(stride),
-        vstride(vstride), base(0), base1(0), base2(0), handle(0), handle1(0),
-        handle2(0)
+    private_handle_t(int fd, int size, int usage, int w,
+                     int h, int format, int stride, int vstride) :
+        fd(fd), fd1(-1), fd2(-1), magic(sMagic), usage(usage), size(size),
+        offset(0), offset1(0), format(format), width(w), height(h),
+        stride(stride), vstride(vstride), base(0), base1(0), base2(0),
+        handle(0), handle1(0), handle2(0)
     {
         version = sizeof(native_handle);
         numInts = sNumInts + 2;
         numFds = sNumFds - 2;
     }
 
-    private_handle_t(int fd, int fd1, int size, int flags, int w,
-		     int h, int format, int stride, int vstride) :
-        fd(fd), fd1(fd1), fd2(-1), magic(sMagic), flags(flags), size(size),
-        offset(0), format(format), width(w), height(h), stride(stride),
-        vstride(vstride), base(0), base1(0), base2(0), handle(0), handle1(0),
-        handle2(0)
+    private_handle_t(int fd, int fd1, int size, int usage, int w,
+                     int h, int format, int stride, int vstride) :
+        fd(fd), fd1(fd1), fd2(-1), magic(sMagic), usage(usage), size(size),
+        offset(0), offset1(0), format(format), width(w), height(h),
+        stride(stride), vstride(vstride), base(0), base1(0), base2(0),
+        handle(0), handle1(0), handle2(0)
     {
         version = sizeof(native_handle);
         numInts = sNumInts + 1;
         numFds = sNumFds - 1;
     }
 
-    private_handle_t(int fd, int fd1, int fd2, int size, int flags, int w,
-		     int h, int format, int stride, int vstride) :
-        fd(fd), fd1(fd1), fd2(fd2), magic(sMagic), flags(flags), size(size),
-        offset(0), format(format), width(w), height(h), stride(stride),
-        vstride(vstride), base(0), base1(0), base2(0), handle(0), handle1(0),
-        handle2(0)
+    private_handle_t(int fd, int fd1, int fd2, int size, int usage, int w,
+                     int h, int format, int stride, int vstride) :
+        fd(fd), fd1(fd1), fd2(fd2), magic(sMagic), usage(usage), size(size),
+        offset(0), offset1(0), format(format), width(w), height(h),
+        stride(stride), vstride(vstride), base(0), base1(0), base2(0),
+        handle(0), handle1(0), handle2(0)
     {
         version = sizeof(native_handle);
         numInts = sNumInts;

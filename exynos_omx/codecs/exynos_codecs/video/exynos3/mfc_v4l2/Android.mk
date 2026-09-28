@@ -6,9 +6,11 @@ LOCAL_CLANG_CFLAGS += \
 	-Wno-int-conversion \
 	-Wno-incompatible-pointer-types
 
+LOCAL_CFLAGS += -Wno-unused-variable -Wno-format -Wno-sign-compare -Wno-unused-function
+
 LOCAL_SRC_FILES := \
-	dec/src/ExynosVideoDecoder.c \
-	enc/src/ExynosVideoEncoder.c
+	enc/src/ExynosVideoEncoder.c \
+	dec/src/ExynosVideoDecoder.c
 
 LOCAL_C_INCLUDES := \
 	$(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr/include \

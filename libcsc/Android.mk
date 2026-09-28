@@ -30,8 +30,10 @@ LOCAL_SHARED_LIBRARIES := liblog libexynosutils
 LOCAL_CFLAGS += -DUSE_SAMSUNG_COLORFORMAT
 LOCAL_CFLAGS += -Wno-unused-parameter
 
-LOCAL_MODULE_RELATIVE_PATH := hw
-LOCAL_PROPRIETARY_MODULE := true
+# libcsc is a regular shared library linked by mediaserver, OMX components,
+# and the camera HAL. It is NOT a HAL module loaded via hw_get_module(), so
+# it must NOT go to vendor/lib/hw/. Install to /system/lib/ where the dynamic
+# linker finds it.
 
 
 LOCAL_C_INCLUDES += \
@@ -39,6 +41,8 @@ LOCAL_C_INCLUDES += \
 
 #LOCAL_CFLAGS += -DENABLE_GSCALER -DENABLE_G2D
 #LOCAL_SHARED_LIBRARIES += libexynosgscaler
+LOCAL_CFLAGS += -DENABLE_FIMC
+LOCAL_SHARED_LIBRARIES += libexynosfimc
 LOCAL_CFLAGS += -DENABLE_SCALER
 #LOCAL_SHARED_LIBRARIES += libexynosscaler
 
